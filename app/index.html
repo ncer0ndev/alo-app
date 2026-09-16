@@ -1,0 +1,27 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+  <meta charset="UTF-8" />
+  <title>Sesli Sohbet</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <div id="join-screen" class="screen">
+    <h1>Sesli Sohbet</h1>
+    <input id="server-url" type="text" placeholder="Sunucu adresi (ör. http://localhost:3000)" value="http://localhost:3000" />
+    <input id="display-name" type="text" placeholder="Adın" />
+    <input id="room-code" type="text" placeholder="Oda kodu (arkadaşlarınla aynı kodu kullan)" />
+    <button id="join-btn">Odaya Katıl</button>
+    <p id="status"></p>
+  </div>
+
+  <div id="room-screen" class="screen hidden">
+    <h2 id="room-title"></h2>
+    <button id="mute-btn">Mikrofonu Kapat</button>
+    <button id="leave-btn">Odadan Ayrıl</button>
+    <ul id="participants"></ul>
+  </div>
+
+  <script src="renderer.js"></script>
+</body>
+</html>
