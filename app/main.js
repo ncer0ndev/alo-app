@@ -3,7 +3,9 @@ const { autoUpdater } = require('electron-updater');
 const { setupUpdater } = require('./updater');
 const path = require('path');
 const fs = require('fs');
+const { execFile } = require('child_process');
 const PTT_KEYS = require('./ptt-keys');
+const GAME_CATALOG = require('./game-catalog.json');
 
 const gotSingleInstanceLock = app.requestSingleInstanceLock();
 if (!gotSingleInstanceLock) {
@@ -27,6 +29,12 @@ function runApp() {
   const callNotifications = new Map(); // roomCode -> Notification
   const chatNotifyState = new Map(); // roomCode -> { timer, count, lastFrom, lastText, showContent }
   const dmNotifyState = new Map(); // fromUsername -> { timer, count, lastText, showContent }
+
+  const GAME_DETECTION_INTERVAL_MS = 20_000;
+  const gameCatalogMap = new Map(GAME_CATALOG.map((g) => [g.process.toLowerCase(), g.name]));
+  let gameDetectionEnabled = false;
+  let gameDetectionTimer = null;
+  let lastDetectedGame = null;
 
   if (process.platform === 'win32') {
     app.setAppUserModelId('com.aloapp.seslisohbet');
@@ -79,6 +87,59 @@ function runApp() {
     const notification = new Notification({ title, body, silent, icon: ICON_PATH });
     notification.show();
     return notification;
+  }
+
+  // ---- oyun algilama (opsiyonel, kullanici Ayarlar'dan acmadikca hic calismaz) ----
+  // Windows 'tasklist' ile calisan islemleri okuyup bilinen oyun listesiyle
+  // (game-catalog.json) eslestirir. Baska hicbir surec/pencere bilgisi
+  // toplanmaz veya gonderilmez; yalnizca eslesen oyunun adi arkadaslarla
+  // paylasilir.
+  function parseTasklistOutput(stdout) {
+    const names = new Set();
+    for (const line of stdout.split(/\r?\n/)) {
+      const match = line.match(/^"([^"]+)"/);
+      if (match) names.add(match[1].toLowerCase().replace(/\.exe$/, ''));
+    }
+    return names;
+  }
+
+  function detectRunningGame() {
+    return new Promise((resolve) => {
+      execFile('tasklist', ['/fo', 'csv', '/nh'], { windowsHide: true, timeout: 5000 }, (err, stdout) => {
+        if (err || !stdout) return resolve(null);
+        const running = parseTasklistOutput(stdout);
+        for (const [proc, name] of gameCatalogMap) {
+          if (running.has(proc)) return resolve(name);
+        }
+        resolve(null);
+      });
+    });
+  }
+
+  async function pollGameDetection() {
+    if (!gameDetectionEnabled) return;
+    const detected = await detectRunningGame();
+    if (detected !== lastDetectedGame) {
+      lastDetectedGame = detected;
+      mainWindow?.webContents.send('game-detected', { game: detected });
+    }
+  }
+
+  function startGameDetection() {
+    if (gameDetectionTimer) return;
+    void pollGameDetection();
+    gameDetectionTimer = setInterval(() => void pollGameDetection(), GAME_DETECTION_INTERVAL_MS);
+  }
+
+  function stopGameDetection() {
+    if (gameDetectionTimer) {
+      clearInterval(gameDetectionTimer);
+      gameDetectionTimer = null;
+    }
+    if (lastDetectedGame !== null) {
+      lastDetectedGame = null;
+      mainWindow?.webContents.send('game-detected', { game: null });
+    }
   }
 
   function createWindow() {
@@ -204,6 +265,13 @@ function runApp() {
     if (!isTrustedSender(event)) return;
     if (!app.isPackaged || process.platform !== 'win32') return;
     app.setLoginItemSettings({ openAtLogin: value === true });
+  });
+
+  ipcMain.on('set-game-detection-enabled', (event, value) => {
+    if (!isTrustedSender(event)) return;
+    gameDetectionEnabled = value === true;
+    if (gameDetectionEnabled) startGameDetection();
+    else stopGameDetection();
   });
 
   ipcMain.on('notify-incoming-call', (event, payload) => {
@@ -338,5 +406,9 @@ function runApp() {
       if (state.timer) clearTimeout(state.timer);
     }
     dmNotifyState.clear();
+    if (gameDetectionTimer) {
+      clearInterval(gameDetectionTimer);
+      gameDetectionTimer = null;
+    }
   });
 }

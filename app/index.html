@@ -266,16 +266,32 @@
             <span>bilgisayar açılışında otomatik başlat</span>
           </label>
           <p class="hint-text">yalnızca kurulmuş (paketlenmiş) uygulamada çalışır; kaynak koddan başlatılan geliştirme sürümünde etkisizdir.</p>
+
+          <div class="section-header">// oyun durumu</div>
+          <label class="radio-row">
+            <input type="checkbox" id="game-detection-checkbox" />
+            <span>arkadaşlarıma hangi oyunu oynadığımı göster</span>
+          </label>
+          <p class="hint-text">açıksa uygulama arka planda, bilinen bir oyun listesiyle karşılaştırarak hangi oyunu çalıştırdığını periyodik olarak kontrol eder ve yalnızca eşleşen oyunun adını arkadaşlarınla paylaşır. Başka hiçbir program adı toplanmaz/gönderilmez. Varsayılan olarak kapalıdır.</p>
         </div>
 
         <div id="tab-profile" class="tab-content hidden">
           <div class="section-header">// profil</div>
           <p id="profile-username" class="status-line ok"></p>
           <div id="profile-avatar-preview"></div>
+          <p id="my-game-status" class="status-line ok hidden"></p>
           <div class="section-header">// profil resmini seç</div>
           <p class="hint-text">Seçimin hesabına kaydedilir ve arkadaşlarına görünür.</p>
           <div id="avatar-grid" class="avatar-grid" role="group" aria-label="Profil resmi seçimi"></div>
           <p id="avatar-status" class="status-line" role="status" aria-live="polite"></p>
+
+          <div class="section-header">// durum mesajı</div>
+          <label class="field">
+            <span class="prompt">durum:</span>
+            <input id="status-message-input" type="text" maxlength="60" placeholder="ör. ranked oynuyorum" />
+          </label>
+          <button id="save-status-btn" class="btn btn-block">[ DURUMU KAYDET ]</button>
+          <p id="status-message-status" class="status-line"></p>
 
           <div class="section-header">// şifre değiştir</div>
           <label class="field">

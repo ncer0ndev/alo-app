@@ -34,6 +34,9 @@ async function createSchema() {
   if (!columns.rows.some((column) => column.name === 'avatar_id')) {
     await client.execute("ALTER TABLE users ADD COLUMN avatar_id TEXT NOT NULL DEFAULT 'panda'");
   }
+  if (!columns.rows.some((column) => column.name === 'status_message')) {
+    await client.execute("ALTER TABLE users ADD COLUMN status_message TEXT NOT NULL DEFAULT ''");
+  }
   await client.execute(`
     CREATE TABLE IF NOT EXISTS friendships (
       user_a_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -240,7 +243,7 @@ async function areFriends(idA, idB) {
 
 async function listFriends(userId) {
   const res = await client.execute({
-    sql: `SELECT u.id, u.username, u.avatar_id FROM friendships f
+    sql: `SELECT u.id, u.username, u.avatar_id, u.status_message FROM friendships f
           JOIN users u ON u.id = CASE WHEN f.user_a_id = ? THEN f.user_b_id ELSE f.user_a_id END
           WHERE f.user_a_id = ? OR f.user_b_id = ?`,
     args: [userId, userId, userId],
@@ -386,10 +389,15 @@ async function setPasswordHash(userId, passwordHash) {
   await client.execute({ sql: 'UPDATE users SET password_hash = ? WHERE id = ?', args: [passwordHash, userId] });
 }
 
+async function setStatusMessage(userId, statusMessage) {
+  await client.execute({ sql: 'UPDATE users SET status_message = ? WHERE id = ?', args: [statusMessage, userId] });
+}
+
 module.exports = {
   async setAvatar(userId, avatarId) {
     await client.execute({ sql: 'UPDATE users SET avatar_id = ? WHERE id = ?', args: [avatarId, userId] });
   },
+  setStatusMessage,
   usingRemote,
   init,
   createUser,

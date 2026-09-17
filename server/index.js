@@ -73,6 +73,7 @@ const rooms = new Map(); // roomCode -> { members, createdAt, messages, seenClie
 const onlineUsers = new Map(); // usernameLower -> Set<socketId>
 const pendingCalls = new Map(); // roomCode -> { callerSocketId, calleeSocketId, timeoutHandle }
 const ownerActiveRoom = new Map(); // ownerUserId -> roomCode (sadece sahibin fiilen odada oldugu 'room' tipi odalar)
+const gameStatusByUsername = new Map(); // usernameLower -> oyun adi (aninlik, kalici degil, opsiyonel/opt-in)
 
 function addOnlineSocket(key, socketId) {
   let set = onlineUsers.get(key);
@@ -291,7 +292,7 @@ app.post(
 app.get('/api/me', requireAuth, asyncRoute(async (req, res) => {
   const user = await db.getUserById(req.userId);
   if (!user) return res.status(401).json({ error: 'gecersiz oturum' });
-  res.json({ username: user.username, avatarId: publicAvatar(user) });
+  res.json({ username: user.username, avatarId: publicAvatar(user), statusMessage: user.status_message || '' });
 }));
 
 app.post('/api/profile/avatar', requireAuth, friendLimiter, asyncRoute(async (req, res) => {
@@ -333,6 +334,29 @@ app.post('/api/profile/password', requireAuth, loginLimiter, asyncRoute(async (r
   }
   await db.setPasswordHash(user.id, bcrypt.hashSync(newPassword, 10));
   res.json({ ok: true });
+}));
+
+app.post('/api/profile/status', requireAuth, friendLimiter, asyncRoute(async (req, res) => {
+  const user = await db.getUserById(req.userId);
+  if (!user) return res.status(401).json({ error: 'gecersiz oturum' });
+  const { statusMessage } = req.body || {};
+  if (typeof statusMessage !== 'string' || statusMessage.length > 60) {
+    return res.status(400).json({ error: 'durum mesaji en fazla 60 karakter olabilir' });
+  }
+  const clean = statusMessage.trim();
+  await db.setStatusMessage(user.id, clean);
+  const payload = { username: user.username, statusMessage: clean };
+  const recipients = new Set(onlineUsers.get(user.username.toLowerCase()) || []);
+  for (const friend of await db.listFriends(user.id)) {
+    for (const sid of onlineUsers.get(friend.username.toLowerCase()) || []) recipients.add(sid);
+  }
+  for (const room of rooms.values()) {
+    if ([...room.members].some((sid) => io.sockets.sockets.get(sid)?.data.userId === user.id)) {
+      for (const sid of room.members) recipients.add(sid);
+    }
+  }
+  for (const sid of recipients) io.to(sid).emit('friend-status-message', payload);
+  res.json(payload);
 }));
 
 const METERED_ICE_CACHE_MS = 60 * 60 * 1000; // Metered kimlik bilgileri saatlerce gecerli; her istekte cekmeye gerek yok.
@@ -397,6 +421,8 @@ app.get(
       avatarId: publicAvatar(f),
       online: isUserOnline(f.username),
       roomOpen: !!getOpenRoomForUser(f.id),
+      statusMessage: f.status_message || '',
+      game: gameStatusByUsername.get(f.username.toLowerCase()) || null,
     }));
     const incoming = (await db.listIncomingRequests(req.userId)).map((u) => u.username);
     const outgoing = (await db.listOutgoingRequests(req.userId)).map((u) => u.username);
@@ -942,6 +968,20 @@ io.on('connection', (socket) => {
     cleanupEmptyRoom(roomCode);
   });
 
+  socket.on('set-game-status', (payload) => {
+    const { game } = payload || {};
+    const clean = typeof game === 'string' ? game.trim().slice(0, 60) : '';
+    const existing = gameStatusByUsername.get(usernameKey);
+    if (clean) {
+      if (existing === clean) return; // gereksiz tekrar yayin yok
+      gameStatusByUsername.set(usernameKey, clean);
+    } else {
+      if (!existing) return;
+      gameStatusByUsername.delete(usernameKey);
+    }
+    notifyFriends(userId, 'friend-game-status', { username, game: clean || null }).catch((err) => console.error(err.message));
+  });
+
   socket.on('disconnect', () => {
     leaveCurrentRoom();
 
@@ -962,6 +1002,10 @@ io.on('connection', (socket) => {
     removeOnlineSocket(usernameKey, socket.id);
     if (!onlineUsers.has(usernameKey)) {
       notifyFriends(userId, 'friend-offline', { username }).catch((err) => console.error(err.message));
+      if (gameStatusByUsername.has(usernameKey)) {
+        gameStatusByUsername.delete(usernameKey);
+        notifyFriends(userId, 'friend-game-status', { username, game: null }).catch((err) => console.error(err.message));
+      }
     }
   });
 });

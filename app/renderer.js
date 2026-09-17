@@ -33,6 +33,12 @@ const adminRefreshBtn = document.getElementById('admin-refresh-btn');
 const adminUsersList = document.getElementById('admin-users-list');
 const adminStatusEl = document.getElementById('admin-status');
 
+const gameDetectionCheckbox = document.getElementById('game-detection-checkbox');
+const myGameStatusEl = document.getElementById('my-game-status');
+const statusMessageInput = document.getElementById('status-message-input');
+const saveStatusBtn = document.getElementById('save-status-btn');
+const statusMessageStatusEl = document.getElementById('status-message-status');
+
 const roomCodeDisplay = document.getElementById('room-code-display');
 const copyCodeBtn = document.getElementById('copy-code-btn');
 
@@ -130,6 +136,7 @@ let currentRoomType = 'room';
 let currentRoomCode = null;
 let currentRoomIsOwner = false;
 let pendingRoomSwitch = null;
+let myCurrentGame = null;
 let joining = false;
 let lastCallAttemptAt = 0;
 let audioContext = null;
@@ -226,6 +233,7 @@ function getSettings() {
     notifyChatContent: localStorage.getItem('notifyChatContent') === 'true',
     ringtoneEnabled: localStorage.getItem('ringtoneEnabled') !== 'false',
     ringtoneVolume: Number(localStorage.getItem('ringtoneVolume') ?? '70'),
+    gameDetectionEnabled: localStorage.getItem('gameDetectionEnabled') === 'true',
   };
 }
 
@@ -335,6 +343,7 @@ function showTab(tabName) {
   if (tabName === 'settings') initSettingsTab();
   if (tabName === 'dm') loadDmConversations();
   if (tabName === 'admin') loadAdminUsers();
+  if (tabName === 'profile') loadOwnStatusMessage();
 }
 
 // ---- TURN/ICE yapilandirmasi ----
@@ -397,6 +406,7 @@ function initSettingsTab() {
   notifyDmCheckbox.checked = settings.notifyDmMessage;
   notifyChatContentCheckbox.checked = settings.notifyChatContent;
   runInBackgroundCheckbox.checked = settings.runInBackground;
+  gameDetectionCheckbox.checked = settings.gameDetectionEnabled;
   updateRingtoneVisibility();
 
   if (window.api) {
@@ -712,11 +722,20 @@ function renderFriends(friends, incoming, outgoing) {
     const li = document.createElement('li');
     li.className = 'friend-row';
     li.dataset.username = friend.username.toLowerCase();
+    li.dataset.game = friend.game || '';
+    li.dataset.status = friend.statusMessage || '';
     const dot = document.createElement('span');
     dot.className = `dot ${friend.online ? 'online' : ''}`;
+
+    const main = document.createElement('div');
+    main.className = 'dm-row-main';
     const name = document.createElement('span');
     name.className = 'name';
     name.textContent = friend.username;
+    const presence = document.createElement('span');
+    presence.className = 'preview friend-presence';
+    main.append(name, presence);
+    setPresenceLineText(presence, friend.game, friend.statusMessage);
 
     if (friend.roomOpen) {
       const statusLabel = document.createElement('span');
@@ -727,14 +746,14 @@ function renderFriends(friends, incoming, outgoing) {
       joinRoomBtn.textContent = '[ KATIL ]';
       joinRoomBtn.disabled = !friend.online;
       joinRoomBtn.onclick = () => joinFriendRoom(friend.username);
-      li.append(dot, name, statusLabel, joinRoomBtn);
+      li.append(dot, main, statusLabel, joinRoomBtn);
     } else {
       const callBtn = document.createElement('button');
       callBtn.className = 'btn call-btn';
       callBtn.textContent = '[ ARA ]';
       callBtn.disabled = !friend.online || !!currentOutgoingCall;
       callBtn.onclick = () => callFriend(friend.username);
-      li.append(dot, name, callBtn);
+      li.append(dot, main, callBtn);
     }
 
     const removeBtn = document.createElement('button');
@@ -746,6 +765,28 @@ function renderFriends(friends, incoming, outgoing) {
 
     friendsListEl.appendChild(li);
   }
+}
+
+function setPresenceLineText(el, game, statusMessage) {
+  const text = game ? `🎮 ${game}` : statusMessage || '';
+  el.textContent = text;
+  el.classList.toggle('hidden', !text);
+}
+
+function setFriendGame(username, game) {
+  const row = friendsListEl.querySelector(`[data-username="${username.toLowerCase()}"]`);
+  if (!row) return;
+  row.dataset.game = game || '';
+  const presence = row.querySelector('.friend-presence');
+  if (presence) setPresenceLineText(presence, game, row.dataset.status);
+}
+
+function setFriendStatusMessage(username, statusMessage) {
+  const row = friendsListEl.querySelector(`[data-username="${username.toLowerCase()}"]`);
+  if (!row) return;
+  row.dataset.status = statusMessage || '';
+  const presence = row.querySelector('.friend-presence');
+  if (presence) setPresenceLineText(presence, row.dataset.game, statusMessage);
 }
 
 async function respondToRequest(fromUsername, accepted) {
@@ -1753,6 +1794,11 @@ function connectSocket() {
       showToast('yeniden bağlanıldı, odaya tekrar katılınıyor...', 'ok', 3000);
       rejoinAfterReconnect();
     }
+    // Sunucu oyun durumunu baglanti omru boyunca tutar (kalici degil);
+    // yeniden baglanildiginda bilinen son durumu tekrar gonderiyoruz.
+    if (myCurrentGame && getSettings().gameDetectionEnabled) {
+      socket.emit('set-game-status', { game: myCurrentGame });
+    }
   });
 
   socket.on('authenticated', ({ username, avatarId }) => {
@@ -1781,6 +1827,8 @@ function connectSocket() {
 
   socket.on('friend-online', ({ username }) => setFriendOnline(username, true));
   socket.on('friend-offline', ({ username }) => setFriendOnline(username, false));
+  socket.on('friend-game-status', ({ username, game }) => setFriendGame(username, game));
+  socket.on('friend-status-message', ({ username, statusMessage }) => setFriendStatusMessage(username, statusMessage));
   socket.on('friend-request', ({ fromUsername } = {}) => {
     loadFriends();
     if (fromUsername && window.api && getSettings().notifyFriendRequest) {
@@ -1955,6 +2003,34 @@ async function changePassword() {
   }
 }
 
+// ---- durum mesaji ----
+
+async function loadOwnStatusMessage() {
+  const { token } = getSession();
+  try {
+    const res = await fetch(`${getServerUrl()}/api/me`, { headers: { Authorization: `Bearer ${token}` } });
+    const data = await res.json();
+    if (res.ok) statusMessageInput.value = data.statusMessage || '';
+  } catch {
+    // sessizce yoksay
+  }
+  if (myGameStatusEl) {
+    myGameStatusEl.textContent = myCurrentGame ? `şu an oynuyorsun: ${myCurrentGame}` : '';
+    myGameStatusEl.classList.toggle('hidden', !myCurrentGame);
+  }
+}
+
+async function saveStatusMessage() {
+  try {
+    await apiRequest('/api/profile/status', { statusMessage: statusMessageInput.value });
+    statusMessageStatusEl.textContent = '[OK] durum kaydedildi';
+    statusMessageStatusEl.className = 'status-line ok';
+  } catch (err) {
+    statusMessageStatusEl.textContent = err.message;
+    statusMessageStatusEl.className = 'status-line error';
+  }
+}
+
 // ---- yonetim paneli (yalnizca necr0n) ----
 
 function formatAdminDate(iso) {
@@ -2069,6 +2145,14 @@ if (window.api) {
     showTab('dm');
     openDmThread(fromUsername);
   });
+  window.api.onGameDetected(({ game } = {}) => {
+    myCurrentGame = game || null;
+    if (socket && socket.connected) socket.emit('set-game-status', { game: myCurrentGame });
+    if (myGameStatusEl) {
+      myGameStatusEl.textContent = myCurrentGame ? `şu an oynuyorsun: ${myCurrentGame}` : '';
+      myGameStatusEl.classList.toggle('hidden', !myCurrentGame);
+    }
+  });
 }
 
 loginBtn.addEventListener('click', () => authRequest('/api/login'));
@@ -2076,6 +2160,10 @@ registerBtn.addEventListener('click', () => authRequest('/api/register'));
 logoutBtn.addEventListener('click', logout);
 changePasswordBtn.addEventListener('click', changePassword);
 adminRefreshBtn.addEventListener('click', loadAdminUsers);
+saveStatusBtn.addEventListener('click', saveStatusMessage);
+statusMessageInput.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') saveStatusBtn.click();
+});
 addFriendBtn.addEventListener('click', addFriend);
 joinBtn.addEventListener('click', joinRoom);
 createRoomBtn.addEventListener('click', createRoom);
@@ -2243,6 +2331,16 @@ runInBackgroundCheckbox.addEventListener('change', () => {
   if (window.api) window.api.setBackgroundPref(runInBackgroundCheckbox.checked);
 });
 
+gameDetectionCheckbox.addEventListener('change', () => {
+  saveSetting('gameDetectionEnabled', gameDetectionCheckbox.checked);
+  if (window.api) window.api.setGameDetectionEnabled(gameDetectionCheckbox.checked);
+  if (!gameDetectionCheckbox.checked && socket && socket.connected) {
+    myCurrentGame = null;
+    socket.emit('set-game-status', { game: null });
+    if (myGameStatusEl) myGameStatusEl.classList.add('hidden');
+  }
+});
+
 launchAtLoginCheckbox.addEventListener('change', () => {
   if (window.api) window.api.setLaunchAtLogin(launchAtLoginCheckbox.checked);
 });
@@ -2303,6 +2401,7 @@ newPasswordInput.addEventListener('keydown', (e) => {
 applyTheme(getTheme());
 
 if (window.api) window.api.setBackgroundPref(getSettings().runInBackground);
+if (window.api) window.api.setGameDetectionEnabled(getSettings().gameDetectionEnabled);
 
 const existingSession = getSession();
 if (existingSession.token && existingSession.username) {

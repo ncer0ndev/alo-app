@@ -88,4 +88,12 @@ contextBridge.exposeInMainWorld('api', {
   getLaunchAtLogin: () => ipcRenderer.invoke('get-launch-at-login'),
 
   setLaunchAtLogin: (value) => ipcRenderer.send('set-launch-at-login', !!value),
+
+  setGameDetectionEnabled: (value) => ipcRenderer.send('set-game-detection-enabled', !!value),
+
+  onGameDetected: (callback) => {
+    const listener = (_event, payload) => callback(payload);
+    ipcRenderer.on('game-detected', listener);
+    return () => ipcRenderer.removeListener('game-detected', listener);
+  },
 });
