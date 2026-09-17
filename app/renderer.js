@@ -2564,6 +2564,10 @@ async function openTextChannel(serverId, channelId, channelName) {
   if (ok) {
     textChannelLoadState.classList.add('hidden');
     textChannelLogEl.classList.remove('hidden');
+    // Gecmis, gunluk hala gizliyken cizildi (scrollHeight/clientHeight o an
+    // 0'di), bu yuzden asagi kaydirma sessizce etkisizdi; simdi gorunur
+    // oldugu icin tekrar uyguluyoruz.
+    if (textChannelAutoScroll) scrollTextChannelToBottom();
     markTextChannelRead();
   }
 }
@@ -3375,6 +3379,15 @@ function renderAdminUsers(users) {
     resetBtn.onclick = () => resetAdminUserPassword(u.username, li);
 
     row.append(dot, main, resetBtn);
+
+    if (u.username.toLowerCase() !== getSession().username?.toLowerCase()) {
+      const deleteBtn = document.createElement('button');
+      deleteBtn.className = 'btn btn-ghost';
+      deleteBtn.textContent = '[ HESABI SİL ]';
+      deleteBtn.onclick = () => deleteAdminUserAccount(u.username, li, deleteBtn);
+      row.append(deleteBtn);
+    }
+
     li.append(row);
     adminUsersList.appendChild(li);
   }
@@ -3398,6 +3411,32 @@ async function resetAdminUserPassword(username, rowEl) {
     }
     resultLine.textContent = `${username} için geçici şifre: ${data.tempPassword} (bunu kendisine ilet)`;
   } catch (err) {
+    adminStatusEl.textContent = `[ERROR] ${err.message}`;
+    adminStatusEl.className = 'status-line error';
+  }
+}
+
+async function deleteAdminUserAccount(username, rowEl, btn) {
+  if (
+    !confirm(
+      `"${username}" hesabını kalıcı olarak silmek istediğine emin misin? Bu işlem geri alınamaz; kullanıcının arkadaşlıkları, mesajları ve topluluk üyelikleri de silinir.`
+    )
+  ) {
+    return;
+  }
+  btn.disabled = true;
+  try {
+    const res = await fetch(`${getServerUrl()}/api/admin/users/${encodeURIComponent(username)}`, {
+      method: 'DELETE',
+      headers: { Authorization: `Bearer ${getSession().token}` },
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'hesap silinemedi');
+    rowEl.remove();
+    adminStatusEl.textContent = `[OK] ${username} hesabı silindi`;
+    adminStatusEl.className = 'status-line ok';
+  } catch (err) {
+    btn.disabled = false;
     adminStatusEl.textContent = `[ERROR] ${err.message}`;
     adminStatusEl.className = 'status-line error';
   }

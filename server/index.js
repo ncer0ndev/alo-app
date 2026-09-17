@@ -802,6 +802,32 @@ app.post(
   })
 );
 
+app.delete(
+  '/api/admin/users/:username',
+  requireAuth,
+  requireAdmin,
+  asyncRoute(async (req, res) => {
+    const targetUsername = req.params.username;
+    if (!isValidUsername(targetUsername)) return res.status(400).json({ error: 'gecersiz kullanici adi' });
+    if (targetUsername.toLowerCase() === req.username.toLowerCase()) {
+      return res.status(400).json({ error: 'kendi hesabini bu yoldan silemezsin' });
+    }
+    const target = await db.getUserByUsername(targetUsername);
+    if (!target) return res.status(404).json({ error: 'kullanici bulunamadi' });
+
+    // Cevrimiciyse soket baglantilarini kes; silinen hesap uzerinden islem yapmaya devam edemesin.
+    const socketIds = onlineUsers.get(targetUsername.toLowerCase());
+    if (socketIds) {
+      for (const sid of [...socketIds]) {
+        io.sockets.sockets.get(sid)?.disconnect(true);
+      }
+    }
+
+    await db.deleteUserAccount(target.id);
+    res.json({ ok: true });
+  })
+);
+
 // ---- Sunucular (topluluklar) ----
 // Not: metin kanallari bu surumde yok, yalnizca sesli kanallar. Yetkilendirme
 // her zaman sunucuda server_members tablosundan okunur, istemciye guvenilmez.

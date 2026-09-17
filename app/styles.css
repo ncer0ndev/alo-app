@@ -53,16 +53,16 @@
 }
 
 [data-theme='newsprint'] {
-  --bg: #f9f9f7;
-  --panel: #ffffff;
-  --fg: #111111;
-  --secondary: #444444;
-  --muted: #e5e5e0;
-  --dim: #444444;
-  --accent: #cc0000;
+  --bg: #e3e1db;
+  --panel: #ebe9e2;
+  --fg: #1c1c1a;
+  --secondary: #47453f;
+  --muted: #d3d0c7;
+  --dim: #56534a;
+  --accent: #9c3232;
   --own-color: var(--accent);
-  --error: #cc0000;
-  --border: #111111;
+  --error: #9c3232;
+  --border: #2b2a26;
 
   --font-display: 'Playfair Display', Georgia, 'Times New Roman', serif;
   --font-body: 'Lora', Georgia, serif;
@@ -1013,18 +1013,23 @@ textarea:focus-visible,
   padding-bottom: 14px;
 }
 
+/* Sabit/sinirli bir yukseklik: ic panellerin (kanal listesi, sohbet
+   gunlugu, uye listesi) kendi icinde kaydirmasi icin - aksi halde her yeni
+   mesajda tum pencere asagi dogru uzardi. */
 .app-shell {
-  min-height: 520px;
+  height: clamp(420px, calc(100vh - 260px), 720px);
   display: flex;
   background: var(--panel);
   border-top: 1px solid var(--border);
   margin: 0 -20px -14px;
+  overflow: hidden;
 }
 
 .community-rail {
   flex: 0 0 220px;
   width: 220px;
   min-width: 0;
+  height: 100%;
   background: color-mix(in srgb, var(--bg) 82%, var(--panel));
   border-right: 1px solid var(--border);
   padding: 14px 10px;
@@ -1060,8 +1065,9 @@ textarea:focus-visible,
 .home-area {
   flex: 1 1 auto;
   min-width: 0;
+  height: 100%;
   padding: 4px 24px 20px;
-  overflow: auto;
+  overflow-y: auto;
 }
 
 .home-area .tab-bar,
@@ -1072,6 +1078,7 @@ textarea:focus-visible,
 .community-area {
   flex: 1 1 auto;
   min-width: 0;
+  height: 100%;
   display: flex;
 }
 
@@ -1082,15 +1089,40 @@ textarea:focus-visible,
 
 .community-main {
   flex: 1 1 auto;
+  min-width: 0;
+  height: 100%;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+/* server-detail-view/server-text-channel-view duz div'ler; sohbet gunlugunun
+   yuksekligi yuzde zinciriyle asagi tasindigi icin bu ikisinin de gecerli
+   (tanimli) bir yukseklige sahip olmasi gerekir - aksi halde .chat-log'un
+   ust ataları "auto" kaldigindan ic kaydirma calismaz ve sayfa buyurdu. */
+#server-detail-view {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+}
+
+#server-detail-view.hidden {
+  height: auto;
+}
+
+#server-channels-view {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
 }
 
 .community-members {
   flex: 0 0 240px;
   min-width: 0;
+  min-height: 0;
   background: color-mix(in srgb, var(--bg) 82%, var(--panel));
   border-left: 1px solid var(--border);
   padding: 14px 10px;
-  overflow: auto;
+  overflow-y: auto;
 }
 
 /* Topluluk secilince ray simge-genisligine kuculur (taskbar gibi); tam
@@ -1326,8 +1358,7 @@ textarea:focus-visible,
 }
 
 .server-detail-header {
-  position: sticky;
-  top: 0;
+  flex: 0 0 auto;
   z-index: 2;
   display: flex;
   align-items: center;
@@ -1450,7 +1481,8 @@ textarea:focus-visible,
 .server-text-channel {
   display: flex;
   flex-direction: column;
-  min-height: 520px;
+  flex: 1 1 auto;
+  min-height: 0;
 }
 
 .server-text-channel-header {
@@ -1473,7 +1505,7 @@ textarea:focus-visible,
 .community-message-log {
   flex: 1;
   height: auto;
-  min-height: 320px;
+  min-height: 0;
   margin: 0 18px;
 }
 
@@ -1601,7 +1633,6 @@ textarea:focus-visible,
   .community-welcome { min-height: 280px; padding: 30px 20px; }
   .server-detail-header { position: static; }
   .community-members { max-height: none; }
-  .server-text-channel { min-height: 360px; }
   .server-text-channel-header { flex-wrap: wrap; }
   .community-message-log { margin: 0 12px; }
   #server-text-channel-view .community-empty,

@@ -894,6 +894,45 @@ async function getUnreadCountsByChannel(serverId, userId) {
   return map;
 }
 
+// Bir kullanici hesabini ve ona ait tum verileri siler (yonetim paneli).
+// Yabanci anahtarlar bu istemcide zorlanmadigindan (PRAGMA foreign_keys
+// kapali), kaskad silme acikca elle yapiliyor. Kullanicinin sahibi oldugu
+// topluluklar icin: baska uye varsa sahiplik en eski katilan uyeye devredilir,
+// yoksa topluluk (kanallari/mesajlariyla birlikte) tamamen silinir.
+async function deleteUserAccount(userId) {
+  const ownedServers = await client.execute({ sql: 'SELECT id FROM servers WHERE owner_user_id = ?', args: [userId] });
+  for (const row of ownedServers.rows) {
+    const serverId = Number(row.id);
+    const nextOwner = await client.execute({
+      sql: 'SELECT user_id FROM server_members WHERE server_id = ? AND user_id != ? ORDER BY joined_at ASC LIMIT 1',
+      args: [serverId, userId],
+    });
+    if (nextOwner.rows[0]) {
+      await transferServerOwnership(serverId, userId, Number(nextOwner.rows[0].user_id));
+    } else {
+      await deleteServer(serverId);
+    }
+  }
+
+  await client.batch(
+    [
+      { sql: 'DELETE FROM server_members WHERE user_id = ?', args: [userId] },
+      { sql: 'DELETE FROM server_channel_read_state WHERE user_id = ?', args: [userId] },
+      { sql: 'DELETE FROM server_messages WHERE from_user_id = ?', args: [userId] },
+      { sql: 'DELETE FROM server_bans WHERE user_id = ? OR banned_by_user_id = ?', args: [userId, userId] },
+      { sql: 'DELETE FROM user_reports WHERE reporter_user_id = ? OR reported_user_id = ?', args: [userId, userId] },
+      { sql: 'DELETE FROM server_audit_log WHERE actor_user_id = ?', args: [userId] },
+      { sql: 'DELETE FROM friendships WHERE user_a_id = ? OR user_b_id = ?', args: [userId, userId] },
+      { sql: 'DELETE FROM friend_requests WHERE from_user_id = ? OR to_user_id = ?', args: [userId, userId] },
+      { sql: 'DELETE FROM direct_messages WHERE from_user_id = ? OR to_user_id = ?', args: [userId, userId] },
+      { sql: 'DELETE FROM dm_read_state WHERE user_id = ? OR other_user_id = ?', args: [userId, userId] },
+      { sql: 'DELETE FROM user_blocks WHERE blocker_user_id = ? OR blocked_user_id = ?', args: [userId, userId] },
+      { sql: 'DELETE FROM users WHERE id = ?', args: [userId] },
+    ],
+    'write'
+  );
+}
+
 // listServersForUser'a, her sunucunun metin kanallarindaki toplam okunmamis
 // mesaj sayisini ekler (topluluk sekmesindeki rozet icin).
 async function listServersForUserWithUnread(userId) {
@@ -978,4 +1017,5 @@ module.exports = {
   resolveUserReport,
   addServerAuditLog,
   listServerAuditLog,
+  deleteUserAccount,
 };

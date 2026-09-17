@@ -116,3 +116,96 @@ test('profil: kullanici kendi sifresini degistirebilir, yanlis mevcut sifre redd
   });
   assert.equal(newLoginRes.status, 200);
 });
+
+test('admin: kullanici hesabi silme - yetkilendirme, kendi hesabini silememe, arkadaslik/topluluk temizligi', { timeout: 15000 }, async () => {
+  await ready;
+  const base = `http://127.0.0.1:${server.address().port}`;
+  const bcrypt = require('bcryptjs');
+
+  const admin = await db.getUserByUsername('necr0n');
+  const adminToken = jwt.sign({ userId: admin.id, username: 'necr0n' }, process.env.JWT_SECRET);
+  const adminAuth = { Authorization: `Bearer ${adminToken}`, 'Content-Type': 'application/json' };
+
+  const regularId = await db.createUser('delTestRegular', 'unused-test-hash');
+  const regularToken = jwt.sign({ userId: regularId, username: 'delTestRegular' }, process.env.JWT_SECRET);
+
+  // Admin olmayan biri hesap silemez.
+  const deniedDelete = await fetch(`${base}/api/admin/users/delTestVictim1`, {
+    method: 'DELETE',
+    headers: { Authorization: `Bearer ${regularToken}` },
+  });
+  assert.equal(deniedDelete.status, 403);
+
+  // Admin kendi hesabini bu yoldan silemez.
+  const selfDelete = await fetch(`${base}/api/admin/users/necr0n`, { method: 'DELETE', headers: adminAuth });
+  assert.equal(selfDelete.status, 400);
+
+  // Var olmayan kullanici 404 doner.
+  const missingDelete = await fetch(`${base}/api/admin/users/hicYokBoyleBiri`, { method: 'DELETE', headers: adminAuth });
+  assert.equal(missingDelete.status, 404);
+
+  // --- Silinecek kullanici: arkadasi var, tek basina sahip oldugu bir topluluk var. ---
+  const victim1Id = await db.createUser('delTestVictim1', bcrypt.hashSync('pass12345', 10));
+  const victim1Token = jwt.sign({ userId: victim1Id, username: 'delTestVictim1' }, process.env.JWT_SECRET);
+  const victim1Auth = { Authorization: `Bearer ${victim1Token}`, 'Content-Type': 'application/json' };
+
+  const friendId = await db.createUser('delTestFriend', 'unused-test-hash');
+  await db.createFriendRequest(victim1Id, friendId);
+  await db.acceptFriendRequest(victim1Id, friendId);
+  assert.ok(await db.areFriends(victim1Id, friendId));
+
+  const soloServer = await (
+    await fetch(`${base}/api/servers`, { method: 'POST', headers: victim1Auth, body: JSON.stringify({ name: 'Solo Topluluk' }) })
+  ).json();
+
+  const deleteVictim1 = await fetch(`${base}/api/admin/users/delTestVictim1`, { method: 'DELETE', headers: adminAuth });
+  assert.equal(deleteVictim1.status, 200);
+
+  // Hesap artik giris yapamaz.
+  const loginAfterDelete = await fetch(`${base}/api/login`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ username: 'delTestVictim1', password: 'pass12345' }),
+  });
+  assert.equal(loginAfterDelete.status, 401);
+
+  // Arkadaslik temizlenmis: eski arkadas artik onu listesinde gormuyor.
+  const friendToken = jwt.sign({ userId: friendId, username: 'delTestFriend' }, process.env.JWT_SECRET);
+  const friendsListRes = await fetch(`${base}/api/friends`, { headers: { Authorization: `Bearer ${friendToken}` } });
+  const friendsListBody = await friendsListRes.json();
+  assert.ok(!friendsListBody.friends.some((f) => f.username === 'delTestVictim1'));
+
+  // Tek basina sahip oldugu topluluk tamamen silinmis (baska uye yoktu).
+  const soloServerAfter = await fetch(`${base}/api/servers/${soloServer.id}`, { headers: adminAuth });
+  assert.equal(soloServerAfter.status, 404);
+
+  // Yonetim panelindeki kullanici listesinde artik gorunmuyor.
+  const usersAfter = await (await fetch(`${base}/api/admin/users`, { headers: adminAuth })).json();
+  assert.ok(!usersAfter.users.some((u) => u.username === 'delTestVictim1'));
+
+  // --- Silinecek kullanici: baska uyeleri olan bir toplulugun sahibi. ---
+  const victim2Id = await db.createUser('delTestVictim2', 'unused-test-hash');
+  const victim2Token = jwt.sign({ userId: victim2Id, username: 'delTestVictim2' }, process.env.JWT_SECRET);
+  const victim2Auth = { Authorization: `Bearer ${victim2Token}`, 'Content-Type': 'application/json' };
+
+  const memberId = await db.createUser('delTestMember', 'unused-test-hash');
+  const memberToken = jwt.sign({ userId: memberId, username: 'delTestMember' }, process.env.JWT_SECRET);
+  const memberAuth = { Authorization: `Bearer ${memberToken}`, 'Content-Type': 'application/json' };
+
+  const sharedServer = await (
+    await fetch(`${base}/api/servers`, { method: 'POST', headers: victim2Auth, body: JSON.stringify({ name: 'Paylasilan Topluluk' }) })
+  ).json();
+  await fetch(`${base}/api/servers/join`, {
+    method: 'POST',
+    headers: memberAuth,
+    body: JSON.stringify({ inviteCode: sharedServer.inviteCode }),
+  });
+
+  const deleteVictim2 = await fetch(`${base}/api/admin/users/delTestVictim2`, { method: 'DELETE', headers: adminAuth });
+  assert.equal(deleteVictim2.status, 200);
+
+  // Topluluk silinmemis, sahiplik kalan uyeye devredilmis.
+  const sharedServerAfter = await (await fetch(`${base}/api/servers/${sharedServer.id}`, { headers: memberAuth })).json();
+  assert.equal(sharedServerAfter.role, 'owner');
+  assert.ok(!sharedServerAfter.members.some((m) => m.username === 'delTestVictim2'));
+});
