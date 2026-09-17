@@ -58,6 +58,11 @@ const muteAllBtn = document.getElementById('mute-all-btn');
 const participantsList = document.getElementById('participants');
 const micIndicator = document.getElementById('mic-indicator');
 
+const chatLogEl = document.getElementById('chat-log');
+const chatScrollBtn = document.getElementById('chat-scroll-btn');
+const chatInput = document.getElementById('chat-input');
+const chatSendBtn = document.getElementById('chat-send-btn');
+
 const micSelect = document.getElementById('mic-select');
 const speakerSelect = document.getElementById('speaker-select');
 const micModeRadios = document.querySelectorAll('input[name="mic-mode"]');
@@ -93,6 +98,11 @@ const audioElements = {};
 const participantNames = {};
 const pendingCandidates = {};
 const peerAnalysers = {};
+
+const CHAT_HISTORY_LIMIT = 100;
+let chatMessages = [];
+let chatAutoScroll = true;
+const seenChatMessageIds = new Set();
 
 // ---- yardimci: bildirim / durum satirlari ----
 
@@ -863,7 +873,7 @@ function renderParticipants() {
 
   const me = document.createElement('li');
   me.className = 'participant-row';
-  me.innerHTML = `<span class="name" style="color: var(--secondary)">${myUsername} (sen)</span>`;
+  me.innerHTML = `<span class="name own-name">${myUsername} (sen)</span>`;
   participantsList.appendChild(me);
 
   for (const [id, name] of Object.entries(participantNames)) {
@@ -921,6 +931,144 @@ function muteAllIncoming() {
   });
 }
 
+// ---- sohbet ----
+
+function resetChat() {
+  chatMessages = [];
+  seenChatMessageIds.clear();
+  chatAutoScroll = true;
+  renderChatLog();
+}
+
+function applyChatHistory(history) {
+  for (const m of history || []) {
+    if (seenChatMessageIds.has(m.id)) continue;
+    seenChatMessageIds.add(m.id);
+    chatMessages.push({ ...m, own: m.from === getSession().username });
+  }
+  trimChatMessages();
+  renderChatLog();
+}
+
+function trimChatMessages() {
+  if (chatMessages.length > CHAT_HISTORY_LIMIT) {
+    chatMessages = chatMessages.slice(chatMessages.length - CHAT_HISTORY_LIMIT);
+  }
+}
+
+function formatChatTime(ts) {
+  return new Date(ts).toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit' });
+}
+
+function renderChatLog() {
+  chatLogEl.innerHTML = '';
+  for (const m of chatMessages) {
+    const div = document.createElement('div');
+    div.className = `chat-message ${m.own ? 'own' : ''} ${m.pending ? 'pending' : ''} ${m.failed ? 'failed' : ''}`.trim();
+
+    const meta = document.createElement('div');
+    meta.className = 'meta';
+    let metaText = `${m.from} · ${formatChatTime(m.ts)}`;
+    if (m.pending) metaText += ' · gönderiliyor...';
+    if (m.failed) metaText += ' · başarısız';
+    meta.textContent = metaText;
+
+    const text = document.createElement('div');
+    text.className = 'text';
+    text.textContent = m.text;
+
+    div.append(meta, text);
+
+    if (m.failed) {
+      const retryBtn = document.createElement('button');
+      retryBtn.className = 'btn btn-ghost retry-btn';
+      retryBtn.textContent = '[ TEKRAR DENE ]';
+      retryBtn.onclick = () => {
+        m.pending = true;
+        m.failed = false;
+        renderChatLog();
+        sendChatWithRetry(m);
+      };
+      div.appendChild(retryBtn);
+    }
+
+    chatLogEl.appendChild(div);
+  }
+
+  if (chatAutoScroll) {
+    scrollChatToBottom();
+  } else {
+    chatScrollBtn.classList.toggle('hidden', chatMessages.length === 0);
+  }
+}
+
+function scrollChatToBottom() {
+  chatLogEl.scrollTop = chatLogEl.scrollHeight;
+  chatScrollBtn.classList.add('hidden');
+}
+
+function autoResizeChatInput() {
+  chatInput.style.height = 'auto';
+  chatInput.style.height = `${Math.min(chatInput.scrollHeight, 90)}px`;
+}
+
+function sendChatWithRetry(localMsg) {
+  if (!socket || !socket.connected) {
+    localMsg.pending = false;
+    localMsg.failed = true;
+    renderChatLog();
+    return;
+  }
+  socket.emit('chat-message', { text: localMsg.text, clientMessageId: localMsg.clientMessageId }, (ack) => {
+    const idx = chatMessages.findIndex((m) => m.clientMessageId === localMsg.clientMessageId);
+    if (idx === -1) return;
+    if (ack && ack.ok && ack.message) {
+      seenChatMessageIds.add(ack.message.id);
+      chatMessages[idx] = { ...ack.message, own: true, clientMessageId: localMsg.clientMessageId };
+    } else {
+      chatMessages[idx].pending = false;
+      chatMessages[idx].failed = true;
+      if (ack && ack.error) showToast(ack.error, 'error');
+    }
+    renderChatLog();
+  });
+}
+
+function sendChatMessage() {
+  const text = chatInput.value;
+  if (!text.trim()) return;
+  if (text.length > 2000) {
+    showToast('mesaj çok uzun (en fazla 2000 karakter)', 'error');
+    return;
+  }
+  if (!currentRoomCode) return;
+  if (!socket || !socket.connected) {
+    showToast('bağlantı yok, mesaj gönderilemedi', 'error');
+    return;
+  }
+
+  const clientMessageId =
+    typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random()}`;
+  const localMsg = {
+    id: clientMessageId,
+    clientMessageId,
+    from: getSession().username,
+    text,
+    ts: Date.now(),
+    own: true,
+    pending: true,
+  };
+  chatMessages.push(localMsg);
+  trimChatMessages();
+  chatAutoScroll = true;
+  renderChatLog();
+
+  chatInput.value = '';
+  autoResizeChatInput();
+
+  sendChatWithRetry(localMsg);
+}
+
 // ---- oda / gorusme yasam donguesu ----
 
 async function acquireMicStream() {
@@ -943,6 +1091,7 @@ function joinRoomAck(roomCode) {
 
 async function enterRoom(roomCode, stream) {
   cleanupAllPeers();
+  resetChat();
   localStream = stream;
   muted = false;
 
@@ -959,6 +1108,7 @@ async function enterRoom(roomCode, stream) {
   roomCodeDisplay.textContent = roomCode;
   showScreen(roomScreen);
   renderParticipants();
+  applyChatHistory(result.chatHistory);
   applyMicMode();
 
   for (const peer of result.existingPeers) {
@@ -1007,6 +1157,7 @@ function fullyLeaveRoom() {
   if (socket && currentRoomCode) socket.emit('leave-room');
   cleanupAllPeers();
   stopVoiceActivation();
+  resetChat();
   if (window.api) window.api.unregisterPttShortcut();
   if (localStream) {
     localStream.getTracks().forEach((t) => t.stop());
@@ -1111,6 +1262,14 @@ function connectSocket() {
     cleanupPeer(id);
   });
 
+  socket.on('chat-message', (message) => {
+    if (seenChatMessageIds.has(message.id)) return;
+    seenChatMessageIds.add(message.id);
+    chatMessages.push({ ...message, own: false });
+    trimChatMessages();
+    renderChatLog();
+  });
+
   if (window.api) {
     window.api.onPttToggle(() => {
       if (getSettings().micMode !== 'ptt' || !localStream) return;
@@ -1139,6 +1298,7 @@ async function rejoinAfterReconnect() {
     return;
   }
   renderParticipants();
+  applyChatHistory(result.chatHistory);
   for (const peer of result.existingPeers) {
     addParticipant(peer.id, peer.displayName);
     await callPeer(peer.id);
@@ -1174,6 +1334,28 @@ roomSettingsBtn.addEventListener('click', () => {
 
 returnToCallBtn.addEventListener('click', () => {
   showScreen(roomScreen);
+});
+
+chatSendBtn.addEventListener('click', sendChatMessage);
+
+chatInput.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter' && !e.shiftKey) {
+    e.preventDefault();
+    sendChatMessage();
+  }
+});
+
+chatInput.addEventListener('input', autoResizeChatInput);
+
+chatLogEl.addEventListener('scroll', () => {
+  const threshold = 40;
+  chatAutoScroll = chatLogEl.scrollTop + chatLogEl.clientHeight >= chatLogEl.scrollHeight - threshold;
+  if (chatAutoScroll) chatScrollBtn.classList.add('hidden');
+});
+
+chatScrollBtn.addEventListener('click', () => {
+  chatAutoScroll = true;
+  scrollChatToBottom();
 });
 
 tabBtns.forEach((btn) => btn.addEventListener('click', () => showTab(btn.dataset.tab)));

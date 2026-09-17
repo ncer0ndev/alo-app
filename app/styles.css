@@ -486,6 +486,10 @@ select:focus-visible {
   color: var(--secondary);
 }
 
+.participant-row .own-name {
+  color: var(--secondary);
+}
+
 .participant-row.speaking .name {
   color: var(--fg);
   text-shadow: 0 0 5px rgba(51, 255, 0, 0.6);
@@ -502,6 +506,89 @@ select:focus-visible {
   min-width: 0;
   padding: 4px 8px;
   font-size: 10px;
+}
+
+.chat-log {
+  height: 220px;
+  overflow-y: auto;
+  border: 1px solid var(--border);
+  background: var(--bg);
+  padding: 8px;
+  margin-bottom: 8px;
+  font-size: 12px;
+}
+
+.chat-message {
+  margin-bottom: 10px;
+  word-break: break-word;
+}
+
+.chat-message .meta {
+  color: var(--dim);
+  font-size: 10px;
+  margin-bottom: 2px;
+}
+
+.chat-message.own .meta {
+  color: var(--secondary);
+}
+
+.chat-message .text {
+  color: var(--fg);
+  white-space: pre-wrap;
+}
+
+.chat-message.pending .text {
+  opacity: 0.6;
+}
+
+.chat-message.failed .text {
+  color: var(--error);
+}
+
+.chat-message .retry-btn {
+  margin-top: 4px;
+  padding: 3px 8px;
+  font-size: 10px;
+}
+
+.chat-scroll-btn {
+  width: 100%;
+  margin-bottom: 8px;
+  font-size: 11px;
+  padding: 6px;
+}
+
+.chat-input-row {
+  display: flex;
+  gap: 8px;
+  align-items: flex-end;
+}
+
+.chat-input {
+  flex: 1;
+  min-width: 0;
+  resize: none;
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--fg);
+  font-family: inherit;
+  font-size: 13px;
+  padding: 6px 8px;
+  max-height: 90px;
+  caret-color: var(--accent);
+}
+
+.chat-input:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.chat-input-row .btn {
+  flex: 0 0 auto;
+  min-width: 0;
+  padding: 8px 10px;
+  font-size: 11px;
 }
 
 .hidden {

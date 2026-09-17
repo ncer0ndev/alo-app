@@ -21,6 +21,10 @@ const ROOM_CODE_RE = /^[A-F0-9]{6,12}$/i;
 const CALL_TIMEOUT_MS = 30_000;
 const CALL_COOLDOWN_MS = 3_000;
 const ABANDONED_ROOM_MS = 60_000;
+const CHAT_MAX_LENGTH = 2000;
+const CHAT_HISTORY_LIMIT = 100;
+const CHAT_RATE_LIMIT = 8;
+const CHAT_RATE_WINDOW_MS = 10_000;
 
 function isNonEmptyString(v, maxLen) {
   return typeof v === 'string' && v.length > 0 && v.length <= maxLen;
@@ -48,7 +52,7 @@ app.use(express.json());
 const server = http.createServer(app);
 const io = new Server(server, { cors: { origin: '*' } });
 
-const rooms = new Map(); // roomCode -> { members: Set<socketId>, createdAt }
+const rooms = new Map(); // roomCode -> { members: Set<socketId>, createdAt, messages: [], seenClientIds: Map }
 const onlineUsers = new Map(); // usernameLower -> Set<socketId>
 const pendingCalls = new Map(); // roomCode -> { callerSocketId, calleeSocketId, timeoutHandle }
 
@@ -84,8 +88,8 @@ function emitToUser(username, event, payload) {
   for (const socketId of set) io.to(socketId).emit(event, payload);
 }
 
-function notifyFriends(userId, event, payload) {
-  for (const friend of db.listFriends(userId)) {
+async function notifyFriends(userId, event, payload) {
+  for (const friend of await db.listFriends(userId)) {
     emitToUser(friend.username, event, payload);
   }
 }
@@ -115,7 +119,7 @@ function generateRoomCode() {
 
 function createRoomEntry() {
   const code = generateRoomCode();
-  rooms.set(code, { members: new Set(), createdAt: Date.now() });
+  rooms.set(code, { members: new Set(), createdAt: Date.now(), messages: [], seenClientIds: new Map() });
   return code;
 }
 
@@ -158,44 +162,61 @@ function requireAuth(req, res, next) {
   }
 }
 
+function asyncRoute(fn) {
+  return (req, res) => {
+    fn(req, res).catch((err) => {
+      console.error('istek hatasi:', err.message);
+      res.status(500).json({ error: 'sunucu hatasi' });
+    });
+  };
+}
+
 app.get('/', (_req, res) => res.send('Sesli sohbet sinyalleşme sunucusu çalışıyor.'));
 
-app.post('/api/register', authLimiter, (req, res) => {
-  const { username, password } = req.body || {};
-  if (!isValidUsername(username)) {
-    return res.status(400).json({ error: 'kullanici adi 3-20 karakter olmali, sadece harf/rakam/alt cizgi icerebilir' });
-  }
-  if (!isValidPassword(password)) {
-    return res.status(400).json({ error: 'sifre en az 6 karakter olmali' });
-  }
-  if (db.getUserByUsername(username)) {
-    return res.status(409).json({ error: 'bu kullanici adi zaten alinmis' });
-  }
+app.post(
+  '/api/register',
+  authLimiter,
+  asyncRoute(async (req, res) => {
+    const { username, password } = req.body || {};
+    if (!isValidUsername(username)) {
+      return res.status(400).json({ error: 'kullanici adi 3-20 karakter olmali, sadece harf/rakam/alt cizgi icerebilir' });
+    }
+    if (!isValidPassword(password)) {
+      return res.status(400).json({ error: 'sifre en az 6 karakter olmali' });
+    }
+    if (await db.getUserByUsername(username)) {
+      return res.status(409).json({ error: 'bu kullanici adi zaten alinmis' });
+    }
 
-  const passwordHash = bcrypt.hashSync(password, 10);
-  let userId;
-  try {
-    userId = db.createUser(username, passwordHash);
-  } catch {
-    // ayni anda gelen eszamanli kayit denemesine karsi ikinci savunma katmani (UNIQUE kisiti)
-    return res.status(409).json({ error: 'bu kullanici adi zaten alinmis' });
-  }
-  const token = jwt.sign({ userId, username }, JWT_SECRET, { expiresIn: '30d' });
-  res.json({ token, username });
-});
+    const passwordHash = bcrypt.hashSync(password, 10);
+    let userId;
+    try {
+      userId = await db.createUser(username, passwordHash);
+    } catch {
+      // ayni anda gelen eszamanli kayit denemesine karsi ikinci savunma katmani (UNIQUE kisiti)
+      return res.status(409).json({ error: 'bu kullanici adi zaten alinmis' });
+    }
+    const token = jwt.sign({ userId, username }, JWT_SECRET, { expiresIn: '30d' });
+    res.json({ token, username });
+  })
+);
 
-app.post('/api/login', authLimiter, (req, res) => {
-  const { username, password } = req.body || {};
-  if (!isNonEmptyString(username, 20) || !isNonEmptyString(password, 72)) {
-    return res.status(400).json({ error: 'kullanici adi ve sifre gerekli' });
-  }
-  const user = db.getUserByUsername(username);
-  if (!user || !bcrypt.compareSync(password, user.password_hash)) {
-    return res.status(401).json({ error: 'kullanici adi veya sifre hatali' });
-  }
-  const token = jwt.sign({ userId: user.id, username: user.username }, JWT_SECRET, { expiresIn: '30d' });
-  res.json({ token, username: user.username });
-});
+app.post(
+  '/api/login',
+  authLimiter,
+  asyncRoute(async (req, res) => {
+    const { username, password } = req.body || {};
+    if (!isNonEmptyString(username, 20) || !isNonEmptyString(password, 72)) {
+      return res.status(400).json({ error: 'kullanici adi ve sifre gerekli' });
+    }
+    const user = await db.getUserByUsername(username);
+    if (!user || !bcrypt.compareSync(password, user.password_hash)) {
+      return res.status(401).json({ error: 'kullanici adi veya sifre hatali' });
+    }
+    const token = jwt.sign({ userId: user.id, username: user.username }, JWT_SECRET, { expiresIn: '30d' });
+    res.json({ token, username: user.username });
+  })
+);
 
 app.get('/api/me', requireAuth, (req, res) => {
   res.json({ username: req.username });
@@ -213,82 +234,105 @@ app.get('/api/ice-servers', requireAuth, (_req, res) => {
   res.json({ iceServers });
 });
 
-app.get('/api/friends', requireAuth, (req, res) => {
-  const friends = db.listFriends(req.userId).map((f) => ({
-    username: f.username,
-    online: isUserOnline(f.username),
-  }));
-  const incoming = db.listIncomingRequests(req.userId).map((u) => u.username);
-  const outgoing = db.listOutgoingRequests(req.userId).map((u) => u.username);
-  res.json({ friends, incoming, outgoing });
-});
+app.get(
+  '/api/friends',
+  requireAuth,
+  asyncRoute(async (req, res) => {
+    const friendRows = await db.listFriends(req.userId);
+    const friends = friendRows.map((f) => ({ username: f.username, online: isUserOnline(f.username) }));
+    const incoming = (await db.listIncomingRequests(req.userId)).map((u) => u.username);
+    const outgoing = (await db.listOutgoingRequests(req.userId)).map((u) => u.username);
+    res.json({ friends, incoming, outgoing });
+  })
+);
 
-app.post('/api/friends/request', requireAuth, friendLimiter, (req, res) => {
-  const { username: targetUsername } = req.body || {};
-  if (!isValidUsername(targetUsername)) return res.status(400).json({ error: 'gecersiz kullanici adi' });
-  if (targetUsername.toLowerCase() === req.username.toLowerCase()) {
-    return res.status(400).json({ error: 'kendini ekleyemezsin' });
-  }
-  const target = db.getUserByUsername(targetUsername);
-  if (!target) return res.status(404).json({ error: 'kullanici bulunamadi' });
-  if (db.areFriends(req.userId, target.id)) return res.status(409).json({ error: 'zaten arkadassiniz' });
+app.post(
+  '/api/friends/request',
+  requireAuth,
+  friendLimiter,
+  asyncRoute(async (req, res) => {
+    const { username: targetUsername } = req.body || {};
+    if (!isValidUsername(targetUsername)) return res.status(400).json({ error: 'gecersiz kullanici adi' });
+    if (targetUsername.toLowerCase() === req.username.toLowerCase()) {
+      return res.status(400).json({ error: 'kendini ekleyemezsin' });
+    }
+    const target = await db.getUserByUsername(targetUsername);
+    if (!target) return res.status(404).json({ error: 'kullanici bulunamadi' });
+    if (await db.areFriends(req.userId, target.id)) return res.status(409).json({ error: 'zaten arkadassiniz' });
 
-  if (db.hasPendingRequest(target.id, req.userId)) {
-    db.acceptFriendRequest(target.id, req.userId);
-    emitToUser(target.username, 'friend-accepted', { byUsername: req.username });
-    return res.json({ ok: true, autoAccepted: true });
-  }
+    if (await db.hasPendingRequest(target.id, req.userId)) {
+      await db.acceptFriendRequest(target.id, req.userId);
+      emitToUser(target.username, 'friend-accepted', { byUsername: req.username });
+      return res.json({ ok: true, autoAccepted: true });
+    }
 
-  const created = db.createFriendRequest(req.userId, target.id);
-  if (!created) return res.status(409).json({ error: 'istek zaten gonderilmis' });
+    const created = await db.createFriendRequest(req.userId, target.id);
+    if (!created) return res.status(409).json({ error: 'istek zaten gonderilmis' });
 
-  emitToUser(target.username, 'friend-request', { fromUsername: req.username });
-  res.json({ ok: true });
-});
+    emitToUser(target.username, 'friend-request', { fromUsername: req.username });
+    res.json({ ok: true });
+  })
+);
 
-app.post('/api/friends/accept', requireAuth, (req, res) => {
-  const { username: fromUsername } = req.body || {};
-  if (!isValidUsername(fromUsername)) return res.status(400).json({ error: 'gecersiz kullanici adi' });
-  const from = db.getUserByUsername(fromUsername);
-  if (!from) return res.status(404).json({ error: 'kullanici bulunamadi' });
+app.post(
+  '/api/friends/accept',
+  requireAuth,
+  asyncRoute(async (req, res) => {
+    const { username: fromUsername } = req.body || {};
+    if (!isValidUsername(fromUsername)) return res.status(400).json({ error: 'gecersiz kullanici adi' });
+    const from = await db.getUserByUsername(fromUsername);
+    if (!from) return res.status(404).json({ error: 'kullanici bulunamadi' });
 
-  const ok = db.acceptFriendRequest(from.id, req.userId);
-  if (!ok) return res.status(400).json({ error: 'bekleyen istek bulunamadi' });
+    const ok = await db.acceptFriendRequest(from.id, req.userId);
+    if (!ok) return res.status(400).json({ error: 'bekleyen istek bulunamadi' });
 
-  emitToUser(from.username, 'friend-accepted', { byUsername: req.username });
-  res.json({ ok: true });
-});
+    emitToUser(from.username, 'friend-accepted', { byUsername: req.username });
+    res.json({ ok: true });
+  })
+);
 
-app.post('/api/friends/decline', requireAuth, (req, res) => {
-  const { username: fromUsername } = req.body || {};
-  if (!isValidUsername(fromUsername)) return res.status(400).json({ error: 'gecersiz kullanici adi' });
-  const from = db.getUserByUsername(fromUsername);
-  if (from) db.declineFriendRequest(from.id, req.userId);
-  res.json({ ok: true });
-});
+app.post(
+  '/api/friends/decline',
+  requireAuth,
+  asyncRoute(async (req, res) => {
+    const { username: fromUsername } = req.body || {};
+    if (!isValidUsername(fromUsername)) return res.status(400).json({ error: 'gecersiz kullanici adi' });
+    const from = await db.getUserByUsername(fromUsername);
+    if (from) await db.declineFriendRequest(from.id, req.userId);
+    res.json({ ok: true });
+  })
+);
 
-app.post('/api/friends/cancel', requireAuth, (req, res) => {
-  const { username: targetUsername } = req.body || {};
-  if (!isValidUsername(targetUsername)) return res.status(400).json({ error: 'gecersiz kullanici adi' });
-  const target = db.getUserByUsername(targetUsername);
-  if (target) db.declineFriendRequest(req.userId, target.id);
-  res.json({ ok: true });
-});
+app.post(
+  '/api/friends/cancel',
+  requireAuth,
+  asyncRoute(async (req, res) => {
+    const { username: targetUsername } = req.body || {};
+    if (!isValidUsername(targetUsername)) return res.status(400).json({ error: 'gecersiz kullanici adi' });
+    const target = await db.getUserByUsername(targetUsername);
+    if (target) await db.declineFriendRequest(req.userId, target.id);
+    res.json({ ok: true });
+  })
+);
 
-app.post('/api/friends/remove', requireAuth, (req, res) => {
-  const { username: otherUsername } = req.body || {};
-  if (!isValidUsername(otherUsername)) return res.status(400).json({ error: 'gecersiz kullanici adi' });
-  const other = db.getUserByUsername(otherUsername);
-  if (other) db.removeFriend(req.userId, other.id);
-  res.json({ ok: true });
-});
+app.post(
+  '/api/friends/remove',
+  requireAuth,
+  asyncRoute(async (req, res) => {
+    const { username: otherUsername } = req.body || {};
+    if (!isValidUsername(otherUsername)) return res.status(400).json({ error: 'gecersiz kullanici adi' });
+    const other = await db.getUserByUsername(otherUsername);
+    if (other) await db.removeFriend(req.userId, other.id);
+    res.json({ ok: true });
+  })
+);
 
 app.use((err, _req, res, next) => {
   if (err) return res.status(400).json({ error: 'gecersiz istek' });
   next();
 });
 
-// ---- Socket.IO (sinyalleşme + eslesme) ----
+// ---- Socket.IO (sinyalleşme + eslesme + sohbet) ----
 
 io.use((socket, next) => {
   const token = socket.handshake.auth && socket.handshake.auth.token;
@@ -308,10 +352,11 @@ io.on('connection', (socket) => {
   const usernameKey = username.toLowerCase();
   let currentRoom = null;
   let lastCallAttempt = 0;
+  let chatTimestamps = [];
 
   const cameOnline = addOnlineSocket(usernameKey, socket.id);
   socket.emit('authenticated', { username });
-  if (cameOnline) notifyFriends(userId, 'friend-online', { username });
+  if (cameOnline) notifyFriends(userId, 'friend-online', { username }).catch((err) => console.error(err.message));
 
   function leaveCurrentRoom() {
     if (!currentRoom) return;
@@ -339,6 +384,7 @@ io.on('connection', (socket) => {
 
     leaveCurrentRoom();
     currentRoom = roomCode;
+    chatTimestamps = [];
     socket.join(roomCode);
 
     const existingPeers = [...room.members].map((id) => ({
@@ -348,7 +394,7 @@ io.on('connection', (socket) => {
 
     room.members.add(socket.id);
     socket.to(roomCode).emit('peer-joined', { id: socket.id, displayName: username });
-    ack({ ok: true, roomCode, existingPeers });
+    ack({ ok: true, roomCode, existingPeers, chatHistory: room.messages });
   });
 
   socket.on('leave-room', () => leaveCurrentRoom());
@@ -360,6 +406,43 @@ io.on('connection', (socket) => {
     if (!room || typeof to !== 'string' || !room.members.has(to)) return;
     if (!isValidSignalData(data)) return;
     io.to(to).emit('signal', { from: socket.id, data });
+  });
+
+  socket.on('chat-message', (payload, ack) => {
+    if (typeof ack !== 'function') ack = () => {};
+    if (!currentRoom) return ack({ error: 'bir odada degilsin' });
+    const room = rooms.get(currentRoom);
+    if (!room) return ack({ error: 'oda bulunamadi' });
+
+    const { text, clientMessageId } = payload || {};
+    if (typeof clientMessageId !== 'string' || clientMessageId.length === 0 || clientMessageId.length > 64) {
+      return ack({ error: 'gecersiz istek' });
+    }
+
+    const existing = room.seenClientIds.get(clientMessageId);
+    if (existing) return ack({ ok: true, message: existing });
+
+    if (typeof text !== 'string' || text.trim().length === 0) return ack({ error: 'bos mesaj gonderilemez' });
+    if (text.length > CHAT_MAX_LENGTH) return ack({ error: `mesaj cok uzun (en fazla ${CHAT_MAX_LENGTH} karakter)` });
+
+    const now = Date.now();
+    chatTimestamps = chatTimestamps.filter((t) => now - t < CHAT_RATE_WINDOW_MS);
+    if (chatTimestamps.length >= CHAT_RATE_LIMIT) {
+      return ack({ error: 'cok hizli mesaj gonderiyorsun, biraz yavasla' });
+    }
+    chatTimestamps.push(now);
+
+    const message = { id: crypto.randomUUID(), from: username, text, ts: now };
+
+    room.messages.push(message);
+    if (room.messages.length > CHAT_HISTORY_LIMIT) room.messages.shift();
+    room.seenClientIds.set(clientMessageId, message);
+    if (room.seenClientIds.size > CHAT_HISTORY_LIMIT) {
+      room.seenClientIds.delete(room.seenClientIds.keys().next().value);
+    }
+
+    socket.to(currentRoom).emit('chat-message', message);
+    ack({ ok: true, message });
   });
 
   socket.on('call-friend', (payload, ack) => {
@@ -379,24 +462,29 @@ io.on('connection', (socket) => {
       return ack({ ok: true });
     }
 
-    const targetUser = db.getUserByUsername(toUsername);
-    if (!targetUser || !db.areFriends(userId, targetUser.id)) {
-      socket.emit('call-failed', { toUsername, reason: 'not-friends' });
-      return ack({ ok: true });
-    }
-
     if (isUserBusy(toUsername.toLowerCase())) {
       socket.emit('call-failed', { toUsername, reason: 'busy' });
       return ack({ ok: true });
     }
 
-    const roomCode = createRoomEntry();
-    const timeoutHandle = startCallTimeout(roomCode);
-    pendingCalls.set(roomCode, { callerSocketId: socket.id, calleeSocketId: targetSocketId, timeoutHandle });
+    (async () => {
+      const targetUser = await db.getUserByUsername(toUsername);
+      if (!targetUser || !(await db.areFriends(userId, targetUser.id))) {
+        socket.emit('call-failed', { toUsername, reason: 'not-friends' });
+        return ack({ ok: true });
+      }
 
-    io.to(targetSocketId).emit('incoming-call', { fromUsername: username, roomCode });
-    socket.emit('call-ringing', { toUsername, roomCode });
-    ack({ ok: true });
+      const roomCode = createRoomEntry();
+      const timeoutHandle = startCallTimeout(roomCode);
+      pendingCalls.set(roomCode, { callerSocketId: socket.id, calleeSocketId: targetSocketId, timeoutHandle });
+
+      io.to(targetSocketId).emit('incoming-call', { fromUsername: username, roomCode });
+      socket.emit('call-ringing', { toUsername, roomCode });
+      ack({ ok: true });
+    })().catch((err) => {
+      console.error('call-friend hatasi:', err.message);
+      ack({ error: 'sunucu hatasi' });
+    });
   });
 
   socket.on('call-response', (payload) => {
@@ -443,12 +531,24 @@ io.on('connection', (socket) => {
       }
     }
 
-    const wentOffline = removeOnlineSocket(usernameKey, socket.id);
-    if (wentOffline) notifyFriends(userId, 'friend-offline', { username });
+    removeOnlineSocket(usernameKey, socket.id);
+    if (!onlineUsers.has(usernameKey)) {
+      notifyFriends(userId, 'friend-offline', { username }).catch((err) => console.error(err.message));
+    }
   });
 });
 
 const PORT = process.env.PORT || 3000;
-server.listen(PORT, () => console.log(`Sinyalleşme sunucusu ${PORT} portunda çalışıyor`));
 
-module.exports = { app, server, io };
+async function start() {
+  await db.init();
+  console.log(`Veritabani hazir (${db.usingRemote ? 'uzak: Turso' : 'yerel dosya'}).`);
+  server.listen(PORT, () => console.log(`Sinyalleşme sunucusu ${PORT} portunda çalışıyor`));
+}
+
+const ready = start().catch((err) => {
+  console.error('Sunucu baslatilamadi:', err.message);
+  process.exit(1);
+});
+
+module.exports = { app, server, io, ready };

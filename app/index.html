@@ -2,7 +2,7 @@
 <html lang="tr">
 <head>
   <meta charset="UTF-8" />
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; connect-src 'self' https://alo-app.onrender.com wss://alo-app.onrender.com; img-src 'self'; media-src 'self' blob:; object-src 'none'; base-uri 'none'; form-action 'none';" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; connect-src 'self' https://alo-app.onrender.com wss://alo-app.onrender.com; img-src 'self'; media-src 'self' blob:; object-src 'none'; base-uri 'none'; form-action 'none';" />
   <title>Sesli Sohbet</title>
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet" />
@@ -189,6 +189,15 @@
         <p id="mic-indicator" class="status-line hidden"></p>
         <div class="participants-header">// AKTİF KULLANICILAR</div>
         <ul id="participants" class="participants"></ul>
+
+        <div class="section-header">// sohbet</div>
+        <p class="hint-text">bu sohbet kalıcı değildir; oda kapanınca silinir.</p>
+        <div id="chat-log" class="chat-log" role="log" aria-live="polite"></div>
+        <button id="chat-scroll-btn" class="btn btn-ghost chat-scroll-btn hidden">[ YENİ MESAJLAR ▾ ]</button>
+        <div class="chat-input-row">
+          <textarea id="chat-input" class="chat-input" placeholder="mesaj yaz... (Enter: gönder, Shift+Enter: yeni satır)" maxlength="2000" rows="1"></textarea>
+          <button id="chat-send-btn" class="btn">[ GÖNDER ]</button>
+        </div>
       </div>
     </div>
   </main>

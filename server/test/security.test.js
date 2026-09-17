@@ -11,8 +11,12 @@ process.env.JWT_SECRET = 'test-secret-only-for-automated-tests';
 process.env.PORT = String(TEST_PORT);
 process.env.DB_PATH = TEST_DB;
 
-const { server } = require('../index');
+const { server, ready } = require('../index');
 const BASE = `http://localhost:${TEST_PORT}`;
+
+test.before(async () => {
+  await ready;
+});
 
 test.after(() => {
   server.close();
@@ -210,4 +214,108 @@ test('gecersiz oda koduna katilma yeni oda olusturmaz', async () => {
   assert.ok(result.error, 'olmayan oda kodu hata dondurmeli');
 
   s1.close();
+});
+
+test('sohbet: ayni odadakiler mesajlasabilir, farkli oda goremez, yetkisiz gonderim reddedilir', async () => {
+  const u1 = await register(uniqueUsername('chat1'), 'password1');
+  const u2 = await register(uniqueUsername('chat2'), 'password1');
+  const outsider = await register(uniqueUsername('chatout'), 'password1');
+
+  const s1 = connectSocket(u1.body.token);
+  const s2 = connectSocket(u2.body.token);
+  const sOutsider = connectSocket(outsider.body.token);
+  await Promise.all([waitFor(s1, 'authenticated'), waitFor(s2, 'authenticated'), waitFor(sOutsider, 'authenticated')]);
+
+  const { roomCode } = await new Promise((resolve) => s1.emit('create-room', resolve));
+  await new Promise((resolve) => s1.emit('join-room', { roomCode }, resolve));
+  await new Promise((resolve) => s2.emit('join-room', { roomCode }, resolve));
+
+  // yetkisiz gonderim: odada olmayan biri mesaj gonderemez
+  const unauthorizedResult = await new Promise((resolve) =>
+    sOutsider.emit('chat-message', { text: 'merhaba', clientMessageId: 'c-unauth' }, resolve)
+  );
+  assert.ok(unauthorizedResult.error, 'odada olmayan kullanici mesaj gonderememeli');
+
+  // ayni odadaki mesajlasma
+  const received = waitFor(s2, 'chat-message');
+  const ack = await new Promise((resolve) => s1.emit('chat-message', { text: 'selam!', clientMessageId: 'c-1' }, resolve));
+  assert.ok(ack.ok && ack.message.id);
+  assert.equal(ack.message.from, u1.body.username);
+  const msg = await received;
+  assert.equal(msg.text, 'selam!');
+  assert.equal(msg.from, u1.body.username);
+
+  // bos mesaj reddedilir
+  const emptyResult = await new Promise((resolve) => s1.emit('chat-message', { text: '   ', clientMessageId: 'c-2' }, resolve));
+  assert.ok(emptyResult.error, 'bos mesaj kabul edilmemeli');
+
+  // 2000 karakteri asan mesaj reddedilir
+  const longResult = await new Promise((resolve) =>
+    s1.emit('chat-message', { text: 'a'.repeat(2001), clientMessageId: 'c-3' }, resolve)
+  );
+  assert.ok(longResult.error, 'cok uzun mesaj kabul edilmemeli');
+
+  // ayni clientMessageId ile tekrar gonderim (retry) ayni mesaji dondurur, kopya olusturmaz
+  const retryAck1 = await new Promise((resolve) => s1.emit('chat-message', { text: 'tekrar test', clientMessageId: 'c-retry' }, resolve));
+  const retryAck2 = await new Promise((resolve) => s1.emit('chat-message', { text: 'tekrar test', clientMessageId: 'c-retry' }, resolve));
+  assert.equal(retryAck1.message.id, retryAck2.message.id, 'ayni clientMessageId ayni mesaj id sini dondurmeli');
+
+  // farkli oda, bu odanin mesajlarini gormemeli (baska bir socket ile ayri oda)
+  const s3 = connectSocket(outsider.body.token);
+  await waitFor(s3, 'authenticated');
+  const { roomCode: otherRoom } = await new Promise((resolve) => s3.emit('create-room', resolve));
+  await new Promise((resolve) => s3.emit('join-room', { roomCode: otherRoom }, resolve));
+
+  let leaked = false;
+  s3.on('chat-message', () => { leaked = true; });
+  s1.emit('chat-message', { text: 'baska odaya sizmamali', clientMessageId: 'c-4' }, () => {});
+  await new Promise((r) => setTimeout(r, 200));
+  assert.equal(leaked, false, 'baska odadaki kullanici bu odanin mesajini almamali');
+
+  s1.close(); s2.close(); sOutsider.close(); s3.close();
+});
+
+test('sohbet: hiz siniri asilinca mesaj reddedilir', async () => {
+  const u1 = await register(uniqueUsername('chatrate'), 'password1');
+  const s1 = connectSocket(u1.body.token);
+  await waitFor(s1, 'authenticated');
+  const { roomCode } = await new Promise((resolve) => s1.emit('create-room', resolve));
+  await new Promise((resolve) => s1.emit('join-room', { roomCode }, resolve));
+
+  let lastResult;
+  for (let i = 0; i < 12; i++) {
+    lastResult = await new Promise((resolve) =>
+      s1.emit('chat-message', { text: `mesaj ${i}`, clientMessageId: `rate-${i}` }, resolve)
+    );
+  }
+  assert.ok(lastResult.error, 'hiz siniri asilinca hata donmeli');
+
+  s1.close();
+});
+
+test('sohbet: oda degistirince gecmis temizlenir, yeni katilan gecmisi ack ile alir', async () => {
+  const u1 = await register(uniqueUsername('chathist'), 'password1');
+  const u2 = await register(uniqueUsername('chathist2'), 'password1');
+  const s1 = connectSocket(u1.body.token);
+  const s2 = connectSocket(u2.body.token);
+  await Promise.all([waitFor(s1, 'authenticated'), waitFor(s2, 'authenticated')]);
+
+  const { roomCode: roomA } = await new Promise((resolve) => s1.emit('create-room', resolve));
+  await new Promise((resolve) => s1.emit('join-room', { roomCode: roomA }, resolve));
+  await new Promise((resolve) => s1.emit('chat-message', { text: 'roomA mesaji', clientMessageId: 'hist-1' }, resolve));
+
+  // s1 baska bir odaya gecer, roomA bosalir ve gecmisi silinir
+  const { roomCode: roomB } = await new Promise((resolve) => s1.emit('create-room', resolve));
+  await new Promise((resolve) => s1.emit('join-room', { roomCode: roomB }, resolve));
+
+  // s2 simdi roomA'ya katilsin - artik kimse yoktu, oda ve gecmisi silinmis olmali (yeni bos oda)
+  const joinRoomAResult = await new Promise((resolve) => s2.emit('join-room', { roomCode: roomA }, resolve));
+  assert.ok(joinRoomAResult.error, 'bosalan oda silinmis olmali, tekrar katilim basarisiz olmali');
+
+  // roomB'ye katilan biri, oradaki gecmisi almamali (henuz mesaj yok)
+  const joinRoomBResult = await new Promise((resolve) => s2.emit('join-room', { roomCode: roomB }, resolve));
+  assert.ok(joinRoomBResult.ok);
+  assert.deepEqual(joinRoomBResult.chatHistory, []);
+
+  s1.close(); s2.close();
 });
