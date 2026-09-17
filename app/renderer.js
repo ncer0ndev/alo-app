@@ -23,6 +23,16 @@ const createRoomBtn = document.getElementById('create-room-btn');
 const tabBtns = document.querySelectorAll('.tab-btn');
 const tabContents = document.querySelectorAll('.tab-content');
 
+const currentPasswordInput = document.getElementById('current-password-input');
+const newPasswordInput = document.getElementById('new-password-input');
+const changePasswordBtn = document.getElementById('change-password-btn');
+const passwordStatusEl = document.getElementById('password-status');
+
+const adminTabBtn = document.getElementById('admin-tab-btn');
+const adminRefreshBtn = document.getElementById('admin-refresh-btn');
+const adminUsersList = document.getElementById('admin-users-list');
+const adminStatusEl = document.getElementById('admin-status');
+
 const roomCodeDisplay = document.getElementById('room-code-display');
 const copyCodeBtn = document.getElementById('copy-code-btn');
 
@@ -288,6 +298,7 @@ function enterJoinScreen(username) {
   setAuthStatus('');
   welcomeText.textContent = `[OK] oturum açıldı: ${username}`;
   profileUsernameEl.textContent = `kullanıcı: ${username}`;
+  adminTabBtn.classList.toggle('hidden', username.toLowerCase() !== 'necr0n');
   showTab('friends');
   showScreen(joinScreen);
   connectSocket();
@@ -323,6 +334,7 @@ function showTab(tabName) {
   tabContents.forEach((content) => content.classList.toggle('hidden', content.id !== `tab-${tabName}`));
   if (tabName === 'settings') initSettingsTab();
   if (tabName === 'dm') loadDmConversations();
+  if (tabName === 'admin') loadAdminUsers();
 }
 
 // ---- TURN/ICE yapilandirmasi ----
@@ -1921,6 +1933,110 @@ function setFriendOnline(username, online) {
   }
 }
 
+// ---- sifre degistirme ----
+
+async function changePassword() {
+  const currentPassword = currentPasswordInput.value;
+  const newPassword = newPasswordInput.value;
+  if (!currentPassword || !newPassword) {
+    passwordStatusEl.textContent = '[ERROR] mevcut ve yeni şifre gerekli';
+    passwordStatusEl.className = 'status-line error';
+    return;
+  }
+  try {
+    await apiRequest('/api/profile/password', { currentPassword, newPassword });
+    currentPasswordInput.value = '';
+    newPasswordInput.value = '';
+    passwordStatusEl.textContent = '[OK] şifre değiştirildi';
+    passwordStatusEl.className = 'status-line ok';
+  } catch (err) {
+    passwordStatusEl.textContent = err.message;
+    passwordStatusEl.className = 'status-line error';
+  }
+}
+
+// ---- yonetim paneli (yalnizca necr0n) ----
+
+function formatAdminDate(iso) {
+  try {
+    return new Date(iso.replace(' ', 'T') + 'Z').toLocaleString('tr-TR');
+  } catch {
+    return iso;
+  }
+}
+
+async function loadAdminUsers() {
+  const { token } = getSession();
+  adminStatusEl.textContent = '';
+  try {
+    const res = await fetch(`${getServerUrl()}/api/admin/users`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'kullanıcılar alınamadı');
+    renderAdminUsers(data.users);
+  } catch (err) {
+    adminStatusEl.textContent = `[ERROR] ${err.message}`;
+    adminStatusEl.className = 'status-line error';
+  }
+}
+
+function renderAdminUsers(users) {
+  adminUsersList.innerHTML = '';
+  for (const u of users) {
+    const li = document.createElement('li');
+    li.className = 'friend-row admin-row';
+
+    const row = document.createElement('div');
+    row.className = 'admin-row-main';
+
+    const dot = document.createElement('span');
+    dot.className = `dot ${u.online ? 'online' : ''}`;
+
+    const main = document.createElement('div');
+    main.className = 'dm-row-main';
+    const nameSpan = document.createElement('span');
+    nameSpan.className = 'name';
+    nameSpan.textContent = u.username;
+    const meta = document.createElement('span');
+    meta.className = 'preview';
+    meta.textContent = `${u.friendCount} arkadaş · ${formatAdminDate(u.createdAt)}`;
+    main.append(nameSpan, meta);
+
+    const resetBtn = document.createElement('button');
+    resetBtn.className = 'btn btn-ghost';
+    resetBtn.textContent = '[ ŞİFRE SIFIRLA ]';
+    resetBtn.onclick = () => resetAdminUserPassword(u.username, li);
+
+    row.append(dot, main, resetBtn);
+    li.append(row);
+    adminUsersList.appendChild(li);
+  }
+}
+
+async function resetAdminUserPassword(username, rowEl) {
+  const { token } = getSession();
+  try {
+    const res = await fetch(`${getServerUrl()}/api/admin/users/${encodeURIComponent(username)}/reset-password`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'şifre sıfırlanamadı');
+
+    let resultLine = rowEl.querySelector('.admin-reset-result');
+    if (!resultLine) {
+      resultLine = document.createElement('p');
+      resultLine.className = 'status-line ok admin-reset-result';
+      rowEl.appendChild(resultLine);
+    }
+    resultLine.textContent = `${username} için geçici şifre: ${data.tempPassword} (bunu kendisine ilet)`;
+  } catch (err) {
+    adminStatusEl.textContent = `[ERROR] ${err.message}`;
+    adminStatusEl.className = 'status-line error';
+  }
+}
+
 // ---- olay dinleyicileri ----
 // window.api dinleyicileri burada, uygulama omru boyunca yalnizca bir kez
 // baglanir; connectSocket() oturum degisiminde/yeniden baglanmada tekrar
@@ -1958,6 +2074,8 @@ if (window.api) {
 loginBtn.addEventListener('click', () => authRequest('/api/login'));
 registerBtn.addEventListener('click', () => authRequest('/api/register'));
 logoutBtn.addEventListener('click', logout);
+changePasswordBtn.addEventListener('click', changePassword);
+adminRefreshBtn.addEventListener('click', loadAdminUsers);
 addFriendBtn.addEventListener('click', addFriend);
 joinBtn.addEventListener('click', joinRoom);
 createRoomBtn.addEventListener('click', createRoom);
@@ -2172,6 +2290,9 @@ addFriendInput.addEventListener('keydown', (e) => {
 });
 roomCodeInput.addEventListener('keydown', (e) => {
   if (e.key === 'Enter') joinBtn.click();
+});
+newPasswordInput.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') changePasswordBtn.click();
 });
 
 // ---- baslangic ----

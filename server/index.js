@@ -50,6 +50,17 @@ function isValidSignalData(data) {
   if (data.candidate) return typeof data.candidate === 'object';
   return false;
 }
+function isAdmin(username) {
+  return typeof username === 'string' && username.toLowerCase() === 'necr0n';
+}
+function generateTempPassword() {
+  // 0/O/1/I/l gibi karistirilabilir karakterler haric tutuldu; elle iletilecek.
+  const chars = 'ABCDEFGHJKMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789';
+  const bytes = crypto.randomBytes(12);
+  let pass = '';
+  for (let i = 0; i < 12; i++) pass += chars[bytes[i] % chars.length];
+  return pass;
+}
 
 const app = express();
 app.use(cors());
@@ -225,6 +236,11 @@ function asyncRoute(fn) {
   };
 }
 
+function requireAdmin(req, res, next) {
+  if (!isAdmin(req.username)) return res.status(403).json({ error: 'yetkisiz' });
+  next();
+}
+
 app.get('/', (_req, res) => res.send('Sesli sohbet sinyalleşme sunucusu çalışıyor.'));
 
 app.post(
@@ -303,6 +319,20 @@ app.post('/api/profile/avatar', requireAuth, friendLimiter, asyncRoute(async (re
   }
   for (const sid of recipients) io.to(sid).emit('profile-updated', payload);
   res.json(payload);
+}));
+
+app.post('/api/profile/password', requireAuth, loginLimiter, asyncRoute(async (req, res) => {
+  const user = await db.getUserById(req.userId);
+  if (!user) return res.status(401).json({ error: 'gecersiz oturum' });
+  const { currentPassword, newPassword } = req.body || {};
+  if (!isNonEmptyString(currentPassword, 72) || !bcrypt.compareSync(currentPassword, user.password_hash)) {
+    return res.status(401).json({ error: 'mevcut sifre hatali' });
+  }
+  if (!isValidPassword(newPassword)) {
+    return res.status(400).json({ error: 'yeni sifre en az 6 karakter olmali' });
+  }
+  await db.setPasswordHash(user.id, bcrypt.hashSync(newPassword, 10));
+  res.json({ ok: true });
 }));
 
 const METERED_ICE_CACHE_MS = 60 * 60 * 1000; // Metered kimlik bilgileri saatlerce gecerli; her istekte cekmeye gerek yok.
@@ -520,6 +550,44 @@ app.post(
     if (!target) return res.status(404).json({ error: 'kullanici bulunamadi' });
     await db.markDmRead(req.userId, target.id, Date.now());
     res.json({ ok: true });
+  })
+);
+
+// ---- Yonetim paneli (yalnizca necr0n hesabi) ----
+
+app.get(
+  '/api/admin/users',
+  requireAuth,
+  requireAdmin,
+  asyncRoute(async (_req, res) => {
+    const users = await db.listAllUsers();
+    res.json({
+      users: users.map((u) => ({
+        username: u.username,
+        avatarId: publicAvatar(u),
+        createdAt: u.created_at,
+        friendCount: Number(u.friend_count),
+        online: isUserOnline(u.username),
+      })),
+    });
+  })
+);
+
+app.post(
+  '/api/admin/users/:username/reset-password',
+  requireAuth,
+  requireAdmin,
+  loginLimiter,
+  asyncRoute(async (req, res) => {
+    const targetUsername = req.params.username;
+    if (!isValidUsername(targetUsername)) return res.status(400).json({ error: 'gecersiz kullanici adi' });
+    const target = await db.getUserByUsername(targetUsername);
+    if (!target) return res.status(404).json({ error: 'kullanici bulunamadi' });
+
+    const tempPassword = generateTempPassword();
+    await db.setPasswordHash(target.id, bcrypt.hashSync(tempPassword, 10));
+    // Sifre yalnizca bu cevapta bir kez donuyor; hicbir yerde duz metin olarak saklanmiyor/loglanmiyor.
+    res.json({ ok: true, tempPassword });
   })
 );
 

@@ -372,6 +372,20 @@ async function markDmRead(userId, otherUserId, ts) {
   });
 }
 
+async function listAllUsers() {
+  const res = await client.execute(`
+    SELECT u.id, u.username, u.avatar_id, u.created_at,
+      (SELECT COUNT(*) FROM friendships f WHERE f.user_a_id = u.id OR f.user_b_id = u.id) AS friend_count
+    FROM users u
+    ORDER BY u.created_at DESC
+  `);
+  return res.rows;
+}
+
+async function setPasswordHash(userId, passwordHash) {
+  await client.execute({ sql: 'UPDATE users SET password_hash = ? WHERE id = ?', args: [passwordHash, userId] });
+}
+
 module.exports = {
   async setAvatar(userId, avatarId) {
     await client.execute({ sql: 'UPDATE users SET avatar_id = ? WHERE id = ?', args: [avatarId, userId] });
@@ -396,4 +410,6 @@ module.exports = {
   getDmReadState,
   countUnreadDirectMessages,
   markDmRead,
+  listAllUsers,
+  setPasswordHash,
 };

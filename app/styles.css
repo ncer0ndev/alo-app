@@ -603,6 +603,22 @@ input[type="range"] {
   font-family: var(--font-data);
 }
 
+.admin-row {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 6px;
+}
+
+.admin-row-main {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.admin-reset-result {
+  word-break: break-word;
+}
+
 .call-banner {
   position: fixed;
   top: 14px;

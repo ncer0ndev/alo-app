@@ -82,6 +82,7 @@
           <button class="tab-btn" data-tab="join">[ ODAYA KATIL ]</button>
           <button class="tab-btn" data-tab="settings">[ AYARLAR ]</button>
           <button class="tab-btn" data-tab="profile">[ PROFİL ]</button>
+          <button class="tab-btn hidden" data-tab="admin" id="admin-tab-btn">[ YÖNETİM ]</button>
         </div>
 
         <div id="tab-friends" class="tab-content">
@@ -275,7 +276,28 @@
           <p class="hint-text">Seçimin hesabına kaydedilir ve arkadaşlarına görünür.</p>
           <div id="avatar-grid" class="avatar-grid" role="group" aria-label="Profil resmi seçimi"></div>
           <p id="avatar-status" class="status-line" role="status" aria-live="polite"></p>
+
+          <div class="section-header">// şifre değiştir</div>
+          <label class="field">
+            <span class="prompt">mevcut:</span>
+            <input id="current-password-input" type="password" autocomplete="current-password" />
+          </label>
+          <label class="field">
+            <span class="prompt">yeni:</span>
+            <input id="new-password-input" type="password" autocomplete="new-password" placeholder="en az 6 karakter" />
+          </label>
+          <button id="change-password-btn" class="btn btn-block">[ ŞİFREYİ DEĞİŞTİR ]</button>
+          <p id="password-status" class="status-line"></p>
+
           <button id="logout-btn" class="btn btn-ghost btn-block">[ ÇIKIŞ ]</button>
+        </div>
+
+        <div id="tab-admin" class="tab-content hidden">
+          <div class="section-header">// kullanıcılar (yönetim)</div>
+          <p class="hint-text">bu sekme yalnızca sana görünür. bir kullanıcının şifresini sıfırlarsan geçici şifreyi kendisine iletmen gerekir.</p>
+          <button id="admin-refresh-btn" class="btn btn-ghost btn-block">[ YENİLE ]</button>
+          <ul id="admin-users-list" class="friend-list"></ul>
+          <p id="admin-status" class="status-line"></p>
         </div>
 
         <p id="status" class="status-line"></p>
