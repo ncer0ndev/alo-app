@@ -80,6 +80,7 @@
           <button class="tab-btn" data-tab="dm">[ MESAJLAR <span id="dm-tab-badge" class="tab-badge hidden"></span> ]</button>
           <button class="tab-btn" data-tab="create">[ ODA OLUŞTUR ]</button>
           <button class="tab-btn" data-tab="join">[ ODAYA KATIL ]</button>
+          <button class="tab-btn" data-tab="servers">[ SUNUCULAR ]</button>
           <button class="tab-btn" data-tab="settings">[ AYARLAR ]</button>
           <button class="tab-btn" data-tab="profile">[ PROFİL ]</button>
           <button class="tab-btn hidden" data-tab="admin" id="admin-tab-btn">[ YÖNETİM ]</button>
@@ -150,6 +151,65 @@
             <input id="room-code" type="text" placeholder="oda_kodu" />
           </label>
           <button id="join-btn" class="btn btn-block">[ ODAYA KATIL ]</button>
+        </div>
+
+        <div id="tab-servers" class="tab-content hidden">
+          <div id="servers-list-view">
+            <div class="section-header">// sunucu oluştur</div>
+            <label class="field">
+              <span class="prompt">ad:</span>
+              <input id="create-server-name-input" type="text" maxlength="40" placeholder="sunucu adı" />
+            </label>
+            <button id="create-server-btn" class="btn btn-block">[ SUNUCU OLUŞTUR ]</button>
+            <p id="create-server-status" class="status-line"></p>
+
+            <div class="section-header">// davet koduyla katıl</div>
+            <label class="field">
+              <span class="prompt">kod:</span>
+              <input id="join-server-code-input" type="text" maxlength="12" placeholder="davet_kodu" />
+            </label>
+            <button id="join-server-btn" class="btn btn-block">[ SUNUCUYA KATIL ]</button>
+            <p id="join-server-status" class="status-line"></p>
+
+            <div class="section-header">// sunucularım</div>
+            <ul id="servers-list" class="friend-list"></ul>
+            <p id="servers-empty" class="status-line hidden">henüz bir sunucun yok</p>
+          </div>
+
+          <div id="server-detail-view" class="hidden">
+            <div class="room-code-row">
+              <button id="server-back-btn" class="btn btn-ghost">[ ◂ GERİ ]</button>
+              <span id="server-detail-name" class="prompt"></span>
+            </div>
+
+            <div id="server-invite-section" class="hidden">
+              <div class="section-header">// davet kodu (yalnızca sahip)</div>
+              <div class="room-code-row">
+                <span id="server-invite-code" class="prompt"></span>
+                <button id="copy-server-invite-btn" class="btn btn-ghost">[ KOPYALA ]</button>
+                <button id="regen-server-invite-btn" class="btn btn-ghost">[ YENİLE ]</button>
+              </div>
+            </div>
+
+            <div class="section-header">// sesli kanallar</div>
+            <ul id="server-channels-list" class="friend-list"></ul>
+            <div id="create-channel-section" class="hidden">
+              <label class="field">
+                <span class="prompt">kanal:</span>
+                <input id="create-channel-name-input" type="text" maxlength="40" placeholder="kanal adı" />
+              </label>
+              <button id="create-channel-btn" class="btn btn-ghost btn-block">[ KANAL OLUŞTUR ]</button>
+            </div>
+
+            <div class="section-header">// üyeler</div>
+            <ul id="server-members-list" class="friend-list"></ul>
+
+            <div class="btn-row">
+              <button id="leave-server-btn" class="btn btn-ghost hidden">[ SUNUCUDAN AYRIL ]</button>
+              <button id="delete-server-btn" class="btn btn-ghost hidden">[ SUNUCUYU SİL ]</button>
+            </div>
+            <p id="server-detail-status" class="status-line"></p>
+          </div>
         </div>
 
         <div id="tab-settings" class="tab-content hidden">

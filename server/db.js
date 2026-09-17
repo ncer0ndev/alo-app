@@ -1,5 +1,6 @@
 const path = require('path');
 const fs = require('fs');
+const crypto = require('crypto');
 const { createClient } = require('@libsql/client');
 
 const DATA_DIR = path.join(__dirname, 'data');
@@ -73,6 +74,35 @@ async function createSchema() {
       PRIMARY KEY (user_id, other_user_id)
     )
   `);
+  await client.execute(`
+    CREATE TABLE IF NOT EXISTS servers (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      name TEXT NOT NULL,
+      owner_user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      invite_code TEXT NOT NULL UNIQUE,
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    )
+  `);
+  await client.execute(`
+    CREATE TABLE IF NOT EXISTS server_members (
+      server_id INTEGER NOT NULL REFERENCES servers(id) ON DELETE CASCADE,
+      user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      role TEXT NOT NULL DEFAULT 'member',
+      joined_at TEXT NOT NULL DEFAULT (datetime('now')),
+      PRIMARY KEY (server_id, user_id)
+    )
+  `);
+  await client.execute(`
+    CREATE TABLE IF NOT EXISTS server_channels (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      server_id INTEGER NOT NULL REFERENCES servers(id) ON DELETE CASCADE,
+      name TEXT NOT NULL,
+      type TEXT NOT NULL DEFAULT 'voice',
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    )
+  `);
+  await client.execute('CREATE INDEX IF NOT EXISTS idx_server_channels_server ON server_channels(server_id)');
+  await client.execute('CREATE INDEX IF NOT EXISTS idx_server_members_user ON server_members(user_id)');
 }
 
 async function countUsers() {
@@ -393,6 +423,152 @@ async function setStatusMessage(userId, statusMessage) {
   await client.execute({ sql: 'UPDATE users SET status_message = ? WHERE id = ?', args: [statusMessage, userId] });
 }
 
+// ---- sunucular (topluluklar) ----
+
+function generateInviteCode() {
+  return crypto.randomBytes(5).toString('hex').toUpperCase();
+}
+
+async function createServer(name, ownerUserId) {
+  for (let attempt = 0; attempt < 5; attempt++) {
+    const inviteCode = generateInviteCode();
+    try {
+      const result = await client.execute({
+        sql: 'INSERT INTO servers (name, owner_user_id, invite_code) VALUES (?, ?, ?)',
+        args: [name, ownerUserId, inviteCode],
+      });
+      const serverId = Number(result.lastInsertRowid);
+      await client.execute({
+        sql: "INSERT INTO server_members (server_id, user_id, role) VALUES (?, ?, 'owner')",
+        args: [serverId, ownerUserId],
+      });
+      return serverId;
+    } catch (err) {
+      if (isUniqueViolation(err)) continue;
+      throw err;
+    }
+  }
+  throw new Error('davet kodu uretilemedi, tekrar dene');
+}
+
+async function getServerByInviteCode(code) {
+  const res = await client.execute({ sql: 'SELECT * FROM servers WHERE invite_code = ?', args: [code] });
+  return res.rows[0] || null;
+}
+
+async function getServerById(id) {
+  const res = await client.execute({ sql: 'SELECT * FROM servers WHERE id = ?', args: [id] });
+  return res.rows[0] || null;
+}
+
+async function getServerMember(serverId, userId) {
+  const res = await client.execute({
+    sql: 'SELECT * FROM server_members WHERE server_id = ? AND user_id = ?',
+    args: [serverId, userId],
+  });
+  return res.rows[0] || null;
+}
+
+async function addServerMember(serverId, userId, role = 'member') {
+  try {
+    await client.execute({
+      sql: 'INSERT INTO server_members (server_id, user_id, role) VALUES (?, ?, ?)',
+      args: [serverId, userId, role],
+    });
+    return true;
+  } catch (err) {
+    if (isUniqueViolation(err)) return false;
+    throw err;
+  }
+}
+
+async function removeServerMember(serverId, userId) {
+  await client.execute({
+    sql: 'DELETE FROM server_members WHERE server_id = ? AND user_id = ?',
+    args: [serverId, userId],
+  });
+}
+
+async function setServerMemberRole(serverId, userId, role) {
+  await client.execute({
+    sql: 'UPDATE server_members SET role = ? WHERE server_id = ? AND user_id = ?',
+    args: [role, serverId, userId],
+  });
+}
+
+async function listServersForUser(userId) {
+  const res = await client.execute({
+    sql: `SELECT s.id, s.name, s.owner_user_id, s.invite_code, s.created_at, m.role
+          FROM server_members m JOIN servers s ON s.id = m.server_id
+          WHERE m.user_id = ?
+          ORDER BY s.created_at ASC`,
+    args: [userId],
+  });
+  return res.rows;
+}
+
+async function listServerMembers(serverId) {
+  const res = await client.execute({
+    sql: `SELECT u.id, u.username, u.avatar_id, m.role FROM server_members m
+          JOIN users u ON u.id = m.user_id
+          WHERE m.server_id = ?
+          ORDER BY m.joined_at ASC`,
+    args: [serverId],
+  });
+  return res.rows;
+}
+
+async function regenerateInviteCode(serverId) {
+  for (let attempt = 0; attempt < 5; attempt++) {
+    const inviteCode = generateInviteCode();
+    try {
+      await client.execute({ sql: 'UPDATE servers SET invite_code = ? WHERE id = ?', args: [inviteCode, serverId] });
+      return inviteCode;
+    } catch (err) {
+      if (isUniqueViolation(err)) continue;
+      throw err;
+    }
+  }
+  throw new Error('davet kodu uretilemedi, tekrar dene');
+}
+
+async function deleteServer(serverId) {
+  await client.batch(
+    [
+      { sql: 'DELETE FROM server_channels WHERE server_id = ?', args: [serverId] },
+      { sql: 'DELETE FROM server_members WHERE server_id = ?', args: [serverId] },
+      { sql: 'DELETE FROM servers WHERE id = ?', args: [serverId] },
+    ],
+    'write'
+  );
+}
+
+async function createChannel(serverId, name, type = 'voice') {
+  const result = await client.execute({
+    sql: 'INSERT INTO server_channels (server_id, name, type) VALUES (?, ?, ?)',
+    args: [serverId, name, type],
+  });
+  return Number(result.lastInsertRowid);
+}
+
+async function listChannels(serverId, type) {
+  const res = await client.execute(
+    type
+      ? { sql: 'SELECT * FROM server_channels WHERE server_id = ? AND type = ? ORDER BY id ASC', args: [serverId, type] }
+      : { sql: 'SELECT * FROM server_channels WHERE server_id = ? ORDER BY id ASC', args: [serverId] }
+  );
+  return res.rows;
+}
+
+async function getChannelById(id) {
+  const res = await client.execute({ sql: 'SELECT * FROM server_channels WHERE id = ?', args: [id] });
+  return res.rows[0] || null;
+}
+
+async function deleteChannel(channelId) {
+  await client.execute({ sql: 'DELETE FROM server_channels WHERE id = ?', args: [channelId] });
+}
+
 module.exports = {
   async setAvatar(userId, avatarId) {
     await client.execute({ sql: 'UPDATE users SET avatar_id = ? WHERE id = ?', args: [avatarId, userId] });
@@ -420,4 +596,19 @@ module.exports = {
   markDmRead,
   listAllUsers,
   setPasswordHash,
+  createServer,
+  getServerByInviteCode,
+  getServerById,
+  getServerMember,
+  addServerMember,
+  removeServerMember,
+  setServerMemberRole,
+  listServersForUser,
+  listServerMembers,
+  regenerateInviteCode,
+  deleteServer,
+  createChannel,
+  listChannels,
+  getChannelById,
+  deleteChannel,
 };

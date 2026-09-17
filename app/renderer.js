@@ -87,6 +87,31 @@ const chatScrollBtn = document.getElementById('chat-scroll-btn');
 const chatInput = document.getElementById('chat-input');
 const chatSendBtn = document.getElementById('chat-send-btn');
 
+const serversListView = document.getElementById('servers-list-view');
+const serverDetailView = document.getElementById('server-detail-view');
+const createServerNameInput = document.getElementById('create-server-name-input');
+const createServerBtn = document.getElementById('create-server-btn');
+const createServerStatusEl = document.getElementById('create-server-status');
+const joinServerCodeInput = document.getElementById('join-server-code-input');
+const joinServerBtn = document.getElementById('join-server-btn');
+const joinServerStatusEl = document.getElementById('join-server-status');
+const serversListEl = document.getElementById('servers-list');
+const serversEmptyEl = document.getElementById('servers-empty');
+const serverBackBtn = document.getElementById('server-back-btn');
+const serverDetailNameEl = document.getElementById('server-detail-name');
+const serverInviteSection = document.getElementById('server-invite-section');
+const serverInviteCodeEl = document.getElementById('server-invite-code');
+const copyServerInviteBtn = document.getElementById('copy-server-invite-btn');
+const regenServerInviteBtn = document.getElementById('regen-server-invite-btn');
+const serverChannelsList = document.getElementById('server-channels-list');
+const createChannelSection = document.getElementById('create-channel-section');
+const createChannelNameInput = document.getElementById('create-channel-name-input');
+const createChannelBtn = document.getElementById('create-channel-btn');
+const serverMembersList = document.getElementById('server-members-list');
+const leaveServerBtn = document.getElementById('leave-server-btn');
+const deleteServerBtn = document.getElementById('delete-server-btn');
+const serverDetailStatusEl = document.getElementById('server-detail-status');
+
 const dmTabBadge = document.getElementById('dm-tab-badge');
 const dmListView = document.getElementById('dm-list-view');
 const dmThreadView = document.getElementById('dm-thread-view');
@@ -135,6 +160,10 @@ let callRequestPending = false;
 let currentRoomType = 'room';
 let currentRoomCode = null;
 let currentRoomIsOwner = false;
+let currentChannelServerId = null;
+let currentChannelDisplayName = null;
+let currentServerChannelRole = null;
+let activeServerDetail = null; // { id, name, role, inviteCode, members, channels }
 let pendingRoomSwitch = null;
 let myCurrentGame = null;
 let joining = false;
@@ -269,7 +298,13 @@ function showScreen(screen) {
 function updateActiveCallBar() {
   const inRoomScreen = !roomScreen.classList.contains('hidden');
   activeCallBar.classList.toggle('hidden', !currentRoomCode || inRoomScreen);
-  if (currentRoomCode) activeCallText.textContent = currentRoomType === 'call' ? 'ÖZEL GÖRÜŞME DEVAM EDİYOR' : `GÖRÜŞME DEVAM EDİYOR (${currentRoomCode})`;
+  if (!currentRoomCode) return;
+  activeCallText.textContent =
+    currentRoomType === 'call'
+      ? 'ÖZEL GÖRÜŞME DEVAM EDİYOR'
+      : currentRoomType === 'server-channel'
+      ? `KANALDA: ${currentChannelDisplayName || ''}`
+      : `GÖRÜŞME DEVAM EDİYOR (${currentRoomCode})`;
 }
 
 // ---- kimlik dogrulama ----
@@ -332,6 +367,9 @@ function logout() {
   dmListView.classList.remove('hidden');
   dmThreadView.classList.add('hidden');
   updateDmTabBadge();
+  activeServerDetail = null;
+  serverDetailView.classList.add('hidden');
+  serversListView.classList.remove('hidden');
   showScreen(authScreen);
 }
 
@@ -344,6 +382,7 @@ function showTab(tabName) {
   if (tabName === 'dm') loadDmConversations();
   if (tabName === 'admin') loadAdminUsers();
   if (tabName === 'profile') loadOwnStatusMessage();
+  if (tabName === 'servers') loadServersList();
 }
 
 // ---- TURN/ICE yapilandirmasi ----
@@ -937,15 +976,16 @@ function hideOutgoingCall() {
   setCallButtonsEnabled(true);
 }
 
-function updateDirectCallUI(roomType = 'room') {
+function updateDirectCallUI(roomType = 'room', displayLabel = null) {
   currentRoomType = roomType;
   const privateCall = roomType === 'call';
+  const isServerChannel = roomType === 'server-channel';
   const row = roomCodeDisplay.closest('.room-code-row');
   const label = row?.querySelector('.prompt');
-  if (label) label.textContent = privateCall ? 'Özel görüşme:' : 'oda kodu:';
-  roomCodeDisplay.textContent = privateCall ? 'Birebir arama' : currentRoomCode;
-  copyCodeBtn.classList.toggle('hidden', privateCall);
-  leaveBtn.textContent = privateCall ? '[ ARAMAYI BİTİR ]' : '[ ODADAN AYRIL ]';
+  if (label) label.textContent = privateCall ? 'Özel görüşme:' : isServerChannel ? 'kanal:' : 'oda kodu:';
+  roomCodeDisplay.textContent = privateCall ? 'Birebir arama' : isServerChannel ? displayLabel || currentRoomCode : currentRoomCode;
+  copyCodeBtn.classList.toggle('hidden', privateCall || isServerChannel);
+  leaveBtn.textContent = privateCall ? '[ ARAMAYI BİTİR ]' : isServerChannel ? '[ KANALDAN AYRIL ]' : '[ ODADAN AYRIL ]';
 }
 
 // ---- WebRTC eslesme ----
@@ -1157,7 +1197,7 @@ function renderParticipants() {
 
     li.append(profileAvatars.image(name), nameSpan, vol, muteOneBtn);
 
-    if (currentRoomIsOwner && currentRoomType !== 'call') {
+    if (canKickInCurrentRoom()) {
       const kickBtn = document.createElement('button');
       kickBtn.className = 'btn btn-ghost';
       kickBtn.textContent = '[ AT ]';
@@ -1167,6 +1207,12 @@ function renderParticipants() {
 
     participantsList.appendChild(li);
   }
+}
+
+function canKickInCurrentRoom() {
+  if (currentRoomType === 'call') return false;
+  if (currentRoomType === 'server-channel') return currentServerChannelRole === 'owner' || currentServerChannelRole === 'moderator';
+  return currentRoomIsOwner;
 }
 
 function addParticipant(id, name, avatarId) {
@@ -1190,7 +1236,7 @@ function muteAllIncoming() {
 }
 
 async function kickParticipant(targetSocketId, targetName) {
-  if (!currentRoomIsOwner || !socket) return;
+  if (!canKickInCurrentRoom() || !socket) return;
   const ack = await emitWithTimeout('kick-participant', { targetSocketId });
   if (!ack || ack.error) {
     showToast(ack?.error || `${targetName} atılamadı`, 'error');
@@ -1587,6 +1633,345 @@ function sendDmMessage() {
   sendDmWithRetry(localMsg);
 }
 
+// ---- sunucular (topluluklar) ----
+
+async function apiDelete(endpoint) {
+  const { token } = getSession();
+  const res = await fetch(`${getServerUrl()}${endpoint}`, {
+    method: 'DELETE',
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error || 'bir hata oluştu');
+  return data;
+}
+
+function setServerDetailStatus(text, kind = 'info') {
+  serverDetailStatusEl.textContent = text ? `[${kind.toUpperCase()}] ${text}` : '';
+  serverDetailStatusEl.className = `status-line ${kind}`;
+}
+
+async function loadServersList() {
+  const { token } = getSession();
+  try {
+    const res = await fetch(`${getServerUrl()}/api/servers`, { headers: { Authorization: `Bearer ${token}` } });
+    if (!res.ok) return;
+    const data = await res.json();
+    renderServersList(data.servers);
+  } catch {
+    // sessizce yoksay, bir sonraki denemede tekrar dener
+  }
+}
+
+function serverRoleLabel(role) {
+  return role === 'owner' ? 'sahip' : role === 'moderator' ? 'moderatör' : 'üye';
+}
+
+function renderServersList(servers) {
+  serversListEl.innerHTML = '';
+  serversEmptyEl.classList.toggle('hidden', servers.length > 0);
+  for (const s of servers) {
+    const li = document.createElement('li');
+    li.className = 'friend-row';
+    const main = document.createElement('div');
+    main.className = 'dm-row-main';
+    const name = document.createElement('span');
+    name.className = 'name';
+    name.textContent = s.name;
+    const preview = document.createElement('span');
+    preview.className = 'preview';
+    preview.textContent = serverRoleLabel(s.role);
+    main.append(name, preview);
+    li.append(main);
+    li.addEventListener('click', () => openServerDetail(s.id));
+    serversListEl.appendChild(li);
+  }
+}
+
+async function createServer() {
+  const name = createServerNameInput.value.trim();
+  if (!name) return;
+  try {
+    const data = await apiRequest('/api/servers', { name });
+    createServerStatusEl.textContent = '';
+    createServerNameInput.value = '';
+    await openServerDetail(data.id);
+  } catch (err) {
+    createServerStatusEl.textContent = `[ERROR] ${err.message}`;
+    createServerStatusEl.className = 'status-line error';
+  }
+}
+
+async function joinServerByCode() {
+  const inviteCode = joinServerCodeInput.value.trim();
+  if (!inviteCode) return;
+  try {
+    const data = await apiRequest('/api/servers/join', { inviteCode });
+    joinServerStatusEl.textContent = '';
+    joinServerCodeInput.value = '';
+    await openServerDetail(data.id);
+  } catch (err) {
+    joinServerStatusEl.textContent = `[ERROR] ${err.message}`;
+    joinServerStatusEl.className = 'status-line error';
+  }
+}
+
+async function openServerDetail(serverId) {
+  const { token } = getSession();
+  try {
+    const res = await fetch(`${getServerUrl()}/api/servers/${serverId}`, { headers: { Authorization: `Bearer ${token}` } });
+    const data = await res.json();
+    if (!res.ok) {
+      showToast(data.error || 'sunucu açılamadı', 'error');
+      return;
+    }
+    activeServerDetail = data;
+    renderServerDetail();
+    serversListView.classList.add('hidden');
+    serverDetailView.classList.remove('hidden');
+  } catch (err) {
+    showToast('sunucuya ulaşılamadı: ' + err.message, 'error');
+  }
+}
+
+function closeServerDetail() {
+  activeServerDetail = null;
+  serverDetailView.classList.add('hidden');
+  serversListView.classList.remove('hidden');
+  loadServersList();
+}
+
+function renderServerDetail() {
+  if (!activeServerDetail) return;
+  const d = activeServerDetail;
+  serverDetailNameEl.textContent = d.name;
+  setServerDetailStatus('');
+
+  const isOwner = d.role === 'owner';
+  const isMod = d.role === 'moderator';
+  const myUsername = getSession().username.toLowerCase();
+
+  serverInviteSection.classList.toggle('hidden', !isOwner);
+  if (isOwner) serverInviteCodeEl.textContent = d.inviteCode;
+
+  createChannelSection.classList.toggle('hidden', !isOwner && !isMod);
+  leaveServerBtn.classList.toggle('hidden', isOwner);
+  deleteServerBtn.classList.toggle('hidden', !isOwner);
+
+  serverChannelsList.innerHTML = '';
+  for (const c of d.channels) {
+    const li = document.createElement('li');
+    li.className = 'friend-row';
+    const main = document.createElement('div');
+    main.className = 'dm-row-main';
+    const name = document.createElement('span');
+    name.className = 'name';
+    name.textContent = c.name;
+    const preview = document.createElement('span');
+    preview.className = 'preview';
+    preview.textContent = `${c.memberCount} kişi`;
+    main.append(name, preview);
+    li.append(main);
+
+    const joinChBtn = document.createElement('button');
+    joinChBtn.className = 'btn';
+    joinChBtn.textContent = '[ KATIL ]';
+    joinChBtn.onclick = () => joinServerVoiceChannel(d.id, c.id, c.name);
+    li.append(joinChBtn);
+
+    if (isOwner || isMod) {
+      const delBtn = document.createElement('button');
+      delBtn.className = 'btn btn-ghost';
+      delBtn.textContent = '[ SİL ]';
+      delBtn.onclick = () => deleteServerChannel(d.id, c.id);
+      li.append(delBtn);
+    }
+
+    serverChannelsList.appendChild(li);
+  }
+
+  serverMembersList.innerHTML = '';
+  for (const m of d.members) {
+    profileAvatars.remember(m.username, m.avatarId);
+    const li = document.createElement('li');
+    li.className = 'friend-row';
+    const main = document.createElement('div');
+    main.className = 'dm-row-main';
+    const name = document.createElement('span');
+    name.className = 'name';
+    name.textContent = m.username;
+    const preview = document.createElement('span');
+    preview.className = 'preview';
+    preview.textContent = serverRoleLabel(m.role);
+    main.append(name, preview);
+    li.append(profileAvatars.image(m.username), main);
+
+    if (isOwner && m.role !== 'owner') {
+      const roleBtn = document.createElement('button');
+      roleBtn.className = 'btn btn-ghost';
+      roleBtn.textContent = m.role === 'moderator' ? '[ ÜYE YAP ]' : '[ MODERATÖR YAP ]';
+      roleBtn.onclick = () => setServerMemberRole(d.id, m.username, m.role === 'moderator' ? 'member' : 'moderator');
+      li.append(roleBtn);
+    }
+
+    const canRemove = m.role !== 'owner' && (isOwner || (isMod && m.role === 'member')) && m.username.toLowerCase() !== myUsername;
+    if (canRemove) {
+      const removeBtn = document.createElement('button');
+      removeBtn.className = 'btn btn-ghost';
+      removeBtn.textContent = '[ ÇIKAR ]';
+      removeBtn.onclick = () => removeServerMember(d.id, m.username);
+      li.append(removeBtn);
+    }
+
+    serverMembersList.appendChild(li);
+  }
+}
+
+async function createServerChannel() {
+  const name = createChannelNameInput.value.trim();
+  if (!name || !activeServerDetail) return;
+  try {
+    await apiRequest(`/api/servers/${activeServerDetail.id}/channels`, { name });
+    createChannelNameInput.value = '';
+    // Sunucu, olusturulan kanali kanal olayi uzerinden (server-channel-created)
+    // olusturana dahil tum uyelere yayinlar; listeyi burada elle guncellemiyoruz.
+  } catch (err) {
+    setServerDetailStatus(err.message, 'error');
+  }
+}
+
+async function deleteServerChannel(serverId, channelId) {
+  try {
+    await apiDelete(`/api/servers/${serverId}/channels/${channelId}`);
+  } catch (err) {
+    setServerDetailStatus(err.message, 'error');
+  }
+}
+
+async function regenerateServerInvite() {
+  if (!activeServerDetail) return;
+  try {
+    const data = await apiRequest(`/api/servers/${activeServerDetail.id}/invite/regenerate`, {});
+    activeServerDetail.inviteCode = data.inviteCode;
+    serverInviteCodeEl.textContent = data.inviteCode;
+    showToast('davet kodu yenilendi', 'ok', 2500);
+  } catch (err) {
+    setServerDetailStatus(err.message, 'error');
+  }
+}
+
+function copyServerInvite() {
+  if (!activeServerDetail?.inviteCode) return;
+  if (window.api) window.api.copyToClipboard(activeServerDetail.inviteCode);
+  showToast('davet kodu panoya kopyalandı', 'ok', 2500);
+}
+
+async function setServerMemberRole(serverId, username, role) {
+  try {
+    await apiRequest(`/api/servers/${serverId}/members/${encodeURIComponent(username)}/role`, { role });
+    await openServerDetail(serverId);
+  } catch (err) {
+    setServerDetailStatus(err.message, 'error');
+  }
+}
+
+async function removeServerMember(serverId, username) {
+  try {
+    await apiRequest(`/api/servers/${serverId}/members/${encodeURIComponent(username)}/remove`, {});
+    await openServerDetail(serverId);
+  } catch (err) {
+    setServerDetailStatus(err.message, 'error');
+  }
+}
+
+async function leaveServer() {
+  if (!activeServerDetail) return;
+  try {
+    await apiRequest(`/api/servers/${activeServerDetail.id}/leave`, {});
+    showToast('sunucudan ayrıldın', 'ok', 2500);
+    closeServerDetail();
+  } catch (err) {
+    setServerDetailStatus(err.message, 'error');
+  }
+}
+
+async function deleteServer() {
+  if (!activeServerDetail) return;
+  if (!confirm(`"${activeServerDetail.name}" sunucusunu kalıcı olarak silmek istediğine emin misin? Bu işlem geri alınamaz.`)) return;
+  try {
+    await apiDelete(`/api/servers/${activeServerDetail.id}`);
+    showToast('sunucu silindi', 'ok', 3000);
+    closeServerDetail();
+  } catch (err) {
+    setServerDetailStatus(err.message, 'error');
+  }
+}
+
+// ---- sunucu sesli kanallarina katilim ----
+// Ayni WebRTC/sohbet altyapisini (oda 'room' tipiyle) paylasir; sunucu
+// tarafinda 'server-channel' tipiyle ayirt edilir ve uyelik sunucuda
+// dogrulanir (istemciden gelen hicbir yetki iddiasina guvenilmez).
+
+function joinServerVoiceChannel(serverId, channelId, channelName) {
+  if (joining) return;
+  if (currentRoomCode) {
+    pendingRoomSwitch = { type: 'server-channel', serverId, channelId, channelName };
+    switchRoomText.textContent = `Mevcut görüşmeden ayrılıp "${channelName}" kanalına katılacaksın.`;
+    switchRoomBanner.classList.remove('hidden');
+    return;
+  }
+  performJoinServerVoiceChannel(serverId, channelId, channelName);
+}
+
+async function performJoinServerVoiceChannel(serverId, channelId, channelName) {
+  if (joining) return;
+  joining = true;
+  const stream = await acquireMicStream();
+  if (!stream) {
+    joining = false;
+    return;
+  }
+
+  teardownCurrentRoomState();
+  resetChat();
+  localStream = stream;
+  muted = false;
+
+  const ack = await emitWithTimeout('join-server-channel', { channelId });
+  if (!ack || ack.error) {
+    showToast(ack?.error || 'kanala katılınamadı', 'error');
+    localStream.getTracks().forEach((t) => t.stop());
+    localStream = null;
+    joining = false;
+    return;
+  }
+
+  currentRoomCode = ack.roomCode;
+  currentChannelServerId = serverId;
+  currentChannelDisplayName = channelName;
+  const myUsername = getSession().username.toLowerCase();
+  const myMembership =
+    activeServerDetail && activeServerDetail.id === serverId
+      ? activeServerDetail.members.find((m) => m.username.toLowerCase() === myUsername)
+      : null;
+  currentServerChannelRole = myMembership ? myMembership.role : null;
+  currentRoomIsOwner = false;
+
+  updateDirectCallUI('server-channel', channelName);
+  roomAccessSection.classList.add('hidden');
+  showScreen(roomScreen);
+  renderParticipants();
+  applyChatHistory(ack.chatHistory);
+  applyMicMode();
+
+  for (const peer of ack.existingPeers) {
+    addParticipant(peer.id, peer.displayName, peer.avatarId);
+    await callPeer(peer.id);
+  }
+
+  joining = false;
+}
+
 // ---- oda / gorusme yasam donguesu ----
 
 async function acquireMicStream() {
@@ -1640,6 +2025,9 @@ function teardownCurrentRoomState() {
   }
   currentRoomCode = null;
   currentRoomIsOwner = false;
+  currentChannelServerId = null;
+  currentChannelDisplayName = null;
+  currentServerChannelRole = null;
   updateActiveCallBar();
 }
 
@@ -1774,8 +2162,13 @@ function fullyLeaveRoom() {
 }
 
 function leaveRoom() {
+  const wasServerId = currentRoomType === 'server-channel' ? currentChannelServerId : null;
   fullyLeaveRoom();
   showScreen(joinScreen);
+  if (wasServerId) {
+    showTab('servers');
+    openServerDetail(wasServerId);
+  }
   setStatus('');
 }
 
@@ -1895,9 +2288,36 @@ function connectSocket() {
 
   socket.on('kicked-from-room', ({ roomCode } = {}) => {
     if (currentRoomCode && currentRoomCode === roomCode) {
+      const wasServerChannel = currentRoomType === 'server-channel';
       leaveRoom();
-      showToast('Oda sahibi tarafından odadan çıkarıldın.', 'error');
+      showToast(wasServerChannel ? 'Kanaldan çıkarıldın.' : 'Oda sahibi tarafından odadan çıkarıldın.', 'error');
     }
+  });
+
+  socket.on('server-channel-created', ({ serverId, channel }) => {
+    if (activeServerDetail && activeServerDetail.id === serverId) {
+      activeServerDetail.channels.push(channel);
+      renderServerDetail();
+    }
+  });
+
+  socket.on('server-channel-deleted', ({ serverId, channelId }) => {
+    if (activeServerDetail && activeServerDetail.id === serverId) {
+      activeServerDetail.channels = activeServerDetail.channels.filter((c) => c.id !== channelId);
+      renderServerDetail();
+    }
+  });
+
+  socket.on('server-role-changed', ({ serverId, role }) => {
+    showToast(`bir sunucudaki rolün değişti: ${serverRoleLabel(role)}`, 'info', 4000);
+    if (currentChannelServerId === serverId) currentServerChannelRole = role;
+    if (activeServerDetail && activeServerDetail.id === serverId) openServerDetail(serverId);
+  });
+
+  socket.on('server-removed', ({ serverId }) => {
+    showToast('bir sunucudan çıkarıldın', 'error', 4000);
+    if (activeServerDetail && activeServerDetail.id === serverId) closeServerDetail();
+    else loadServersList();
   });
 
   socket.on('chat-message', (message) => {
@@ -2228,6 +2648,24 @@ dmScrollBtn.addEventListener('click', () => {
 
 dmBackBtn.addEventListener('click', closeDmThread);
 
+createServerBtn.addEventListener('click', createServer);
+createServerNameInput.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') createServerBtn.click();
+});
+joinServerBtn.addEventListener('click', joinServerByCode);
+joinServerCodeInput.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') joinServerBtn.click();
+});
+serverBackBtn.addEventListener('click', closeServerDetail);
+copyServerInviteBtn.addEventListener('click', copyServerInvite);
+regenServerInviteBtn.addEventListener('click', regenerateServerInvite);
+createChannelBtn.addEventListener('click', createServerChannel);
+createChannelNameInput.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') createChannelBtn.click();
+});
+leaveServerBtn.addEventListener('click', leaveServer);
+deleteServerBtn.addEventListener('click', deleteServer);
+
 tabBtns.forEach((btn) => btn.addEventListener('click', () => showTab(btn.dataset.tab)));
 
 micSelect.addEventListener('change', async () => {
@@ -2280,7 +2718,12 @@ switchRoomConfirmBtn.addEventListener('click', () => {
   const target = pendingRoomSwitch;
   pendingRoomSwitch = null;
   switchRoomBanner.classList.add('hidden');
-  if (target) performJoinFriendRoom(target);
+  if (!target) return;
+  if (typeof target === 'string') {
+    performJoinFriendRoom(target);
+  } else if (target.type === 'server-channel') {
+    performJoinServerVoiceChannel(target.serverId, target.channelId, target.channelName);
+  }
 });
 
 switchRoomCancelBtn.addEventListener('click', () => {

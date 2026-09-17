@@ -53,6 +53,12 @@ function isValidSignalData(data) {
 function isAdmin(username) {
   return typeof username === 'string' && username.toLowerCase() === 'necr0n';
 }
+function isValidServerOrChannelName(v) {
+  return typeof v === 'string' && v.trim().length >= 2 && v.trim().length <= 40;
+}
+function isValidInviteCode(v) {
+  return typeof v === 'string' && /^[A-F0-9]{6,12}$/i.test(v);
+}
 function generateTempPassword() {
   // 0/O/1/I/l gibi karistirilabilir karakterler haric tutuldu; elle iletilecek.
   const chars = 'ABCDEFGHJKMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789';
@@ -155,6 +161,68 @@ function createRoomEntry({ ownerUserId = null, ownerUsername = null, type = 'roo
 function cleanupEmptyRoom(code) {
   const room = rooms.get(code);
   if (room && room.members.size === 0) rooms.delete(code);
+}
+
+// Bir sunucu sesli kanalinin canli oturumunu dondurur; yoksa olusturur.
+// Kod rastgele degil, kanal kimligine sabit baglidir (herkes ayni koda
+// varmali) ve rastgele oda kodlarindan (hex) ayirt edilebilsin diye
+// alfabetik bir on ek tasir.
+function getOrCreateChannelRoom(channel) {
+  const code = `CH${channel.id}`;
+  let room = rooms.get(code);
+  if (!room) {
+    room = {
+      members: new Set(),
+      createdAt: Date.now(),
+      messages: [],
+      seenClientIds: new Map(),
+      type: 'server-channel',
+      ownerUserId: null,
+      ownerUsername: null,
+      access: 'invite',
+      lastNotifiedOpen: false,
+      serverId: channel.server_id,
+      channelId: channel.id,
+      channelName: channel.name,
+    };
+    rooms.set(code, room);
+  }
+  return code;
+}
+
+// Bir katilimciyi (rizasi olsun olmasin) bir odadan sunucu tarafinda cikarir:
+// digerlerine 'peer-left' yayinlar (P2P ses baglantisini kesen asil
+// mekanizma) ve kendisine 'kicked-from-room' bildirir. Hem soket uzerinden
+// gelen kick-participant hem de REST uzerinden gelen sunucu-uyesi cikarma
+// akislari bunu paylasir.
+function forceKickFromRoom(roomCode, targetSocketId) {
+  const room = rooms.get(roomCode);
+  if (!room || !room.members.has(targetSocketId)) return;
+  room.members.delete(targetSocketId);
+  io.to(roomCode).emit('peer-left', { id: targetSocketId });
+  const targetSocket = io.sockets.sockets.get(targetSocketId);
+  if (targetSocket) {
+    targetSocket.leave(roomCode);
+    // Atilan soketin kendi 'currentRoom' durumu da sifirlanmali; aksi halde
+    // ayni odaya/kanala tekrar katilma denemesinde sunucu onu "zaten iceride"
+    // sanip room.members'a yeniden eklemeden erken donus yapar (odadan fiilen
+    // dusmus olmasina ragmen durum bilgisi eski oday hala gosterirdi).
+    if (targetSocket.data.currentRoom === roomCode) targetSocket.data.currentRoom = null;
+    targetSocket.emit('kicked-from-room', { roomCode });
+  }
+  cleanupEmptyRoom(roomCode);
+}
+
+// Bir kullanici sunucudan (topluluktan) cikarildiginda/atildiginda, o
+// sunucunun herhangi bir sesli kanalinda o an bulunuyorsa oradan da atar.
+function kickUserFromServerVoiceChannels(serverId, targetUserId) {
+  for (const [code, room] of rooms) {
+    if (room.type !== 'server-channel' || room.serverId !== serverId) continue;
+    for (const sid of [...room.members]) {
+      const s = io.sockets.sockets.get(sid);
+      if (s && s.data.userId === targetUserId) forceKickFromRoom(code, sid);
+    }
+  }
 }
 
 // Sahibin, kendi 'room' tipindeki odasinda fiilen (en az bir soketiyle) bulunup
@@ -617,6 +685,249 @@ app.post(
   })
 );
 
+// ---- Sunucular (topluluklar) ----
+// Not: metin kanallari bu surumde yok, yalnizca sesli kanallar. Yetkilendirme
+// her zaman sunucuda server_members tablosundan okunur, istemciye guvenilmez.
+
+function publicServerMember(row) {
+  return { username: row.username, avatarId: publicAvatar(row), role: row.role };
+}
+
+async function requireServerMembership(req, res, serverId) {
+  const server = await db.getServerById(serverId);
+  if (!server) {
+    res.status(404).json({ error: 'sunucu bulunamadi' });
+    return null;
+  }
+  const member = await db.getServerMember(serverId, req.userId);
+  if (!member) {
+    res.status(403).json({ error: 'bu sunucunun uyesi degilsin' });
+    return null;
+  }
+  return { server, member };
+}
+
+app.post(
+  '/api/servers',
+  requireAuth,
+  friendLimiter,
+  asyncRoute(async (req, res) => {
+    const { name } = req.body || {};
+    if (!isValidServerOrChannelName(name)) return res.status(400).json({ error: 'gecersiz sunucu adi (2-40 karakter)' });
+    const serverId = await db.createServer(name.trim(), req.userId);
+    const server = await db.getServerById(serverId);
+    res.json({ id: server.id, name: server.name, inviteCode: server.invite_code, role: 'owner' });
+  })
+);
+
+app.get(
+  '/api/servers',
+  requireAuth,
+  asyncRoute(async (req, res) => {
+    const rows = await db.listServersForUser(req.userId);
+    res.json({
+      servers: rows.map((s) => ({ id: s.id, name: s.name, role: s.role, isOwner: s.owner_user_id === req.userId })),
+    });
+  })
+);
+
+app.post(
+  '/api/servers/join',
+  requireAuth,
+  friendLimiter,
+  asyncRoute(async (req, res) => {
+    const { inviteCode } = req.body || {};
+    if (!isValidInviteCode(inviteCode)) return res.status(400).json({ error: 'gecersiz davet kodu' });
+    const server = await db.getServerByInviteCode(inviteCode.toUpperCase());
+    if (!server) return res.status(404).json({ error: 'davet kodu gecersiz' });
+    const already = await db.getServerMember(server.id, req.userId);
+    if (already) return res.status(409).json({ error: 'zaten bu sunucunun uyesisin' });
+    await db.addServerMember(server.id, req.userId, 'member');
+    res.json({ id: server.id, name: server.name, role: 'member' });
+  })
+);
+
+app.get(
+  '/api/servers/:id',
+  requireAuth,
+  asyncRoute(async (req, res) => {
+    const serverId = Number(req.params.id);
+    const ctx = await requireServerMembership(req, res, serverId);
+    if (!ctx) return;
+    const [members, channels] = await Promise.all([db.listServerMembers(serverId), db.listChannels(serverId, 'voice')]);
+    res.json({
+      id: ctx.server.id,
+      name: ctx.server.name,
+      role: ctx.member.role,
+      inviteCode: ctx.member.role === 'owner' ? ctx.server.invite_code : undefined,
+      members: members.map(publicServerMember),
+      channels: channels.map((c) => ({
+        id: c.id,
+        name: c.name,
+        memberCount: rooms.get(`CH${c.id}`)?.members.size || 0,
+      })),
+    });
+  })
+);
+
+app.post(
+  '/api/servers/:id/channels',
+  requireAuth,
+  friendLimiter,
+  asyncRoute(async (req, res) => {
+    const serverId = Number(req.params.id);
+    const ctx = await requireServerMembership(req, res, serverId);
+    if (!ctx) return;
+    if (ctx.member.role !== 'owner' && ctx.member.role !== 'moderator') {
+      return res.status(403).json({ error: 'yalnizca sahip veya moderator kanal olusturabilir' });
+    }
+    const { name } = req.body || {};
+    if (!isValidServerOrChannelName(name)) return res.status(400).json({ error: 'gecersiz kanal adi (2-40 karakter)' });
+    const channelId = await db.createChannel(serverId, name.trim(), 'voice');
+    const payload = { id: channelId, name: name.trim(), memberCount: 0 };
+    for (const m of await db.listServerMembers(serverId)) emitToUser(m.username, 'server-channel-created', { serverId, channel: payload });
+    res.json(payload);
+  })
+);
+
+app.delete(
+  '/api/servers/:id/channels/:channelId',
+  requireAuth,
+  asyncRoute(async (req, res) => {
+    const serverId = Number(req.params.id);
+    const channelId = Number(req.params.channelId);
+    const ctx = await requireServerMembership(req, res, serverId);
+    if (!ctx) return;
+    if (ctx.member.role !== 'owner' && ctx.member.role !== 'moderator') {
+      return res.status(403).json({ error: 'yalnizca sahip veya moderator kanal silebilir' });
+    }
+    const channel = await db.getChannelById(channelId);
+    if (!channel || channel.server_id !== serverId) return res.status(404).json({ error: 'kanal bulunamadi' });
+
+    const roomCode = `CH${channelId}`;
+    const room = rooms.get(roomCode);
+    if (room) {
+      for (const sid of [...room.members]) forceKickFromRoom(roomCode, sid);
+      rooms.delete(roomCode);
+    }
+    await db.deleteChannel(channelId);
+    for (const m of await db.listServerMembers(serverId)) emitToUser(m.username, 'server-channel-deleted', { serverId, channelId });
+    res.json({ ok: true });
+  })
+);
+
+app.post(
+  '/api/servers/:id/invite/regenerate',
+  requireAuth,
+  friendLimiter,
+  asyncRoute(async (req, res) => {
+    const serverId = Number(req.params.id);
+    const ctx = await requireServerMembership(req, res, serverId);
+    if (!ctx) return;
+    if (ctx.member.role !== 'owner') return res.status(403).json({ error: 'yalnizca sahip davet kodunu yenileyebilir' });
+    const inviteCode = await db.regenerateInviteCode(serverId);
+    res.json({ inviteCode });
+  })
+);
+
+app.post(
+  '/api/servers/:id/members/:username/role',
+  requireAuth,
+  friendLimiter,
+  asyncRoute(async (req, res) => {
+    const serverId = Number(req.params.id);
+    const ctx = await requireServerMembership(req, res, serverId);
+    if (!ctx) return;
+    if (ctx.member.role !== 'owner') return res.status(403).json({ error: 'yalnizca sahip rol degistirebilir' });
+    const { role } = req.body || {};
+    if (role !== 'member' && role !== 'moderator') return res.status(400).json({ error: 'gecersiz rol' });
+    const targetUsername = req.params.username;
+    if (!isValidUsername(targetUsername)) return res.status(400).json({ error: 'gecersiz kullanici adi' });
+    const target = await db.getUserByUsername(targetUsername);
+    if (!target) return res.status(404).json({ error: 'kullanici bulunamadi' });
+    if (target.id === req.userId) return res.status(400).json({ error: 'kendi rolunu degistiremezsin' });
+    const targetMember = await db.getServerMember(serverId, target.id);
+    if (!targetMember) return res.status(404).json({ error: 'kullanici bu sunucunun uyesi degil' });
+    await db.setServerMemberRole(serverId, target.id, role);
+    emitToUser(target.username, 'server-role-changed', { serverId, role });
+    res.json({ ok: true, role });
+  })
+);
+
+app.post(
+  '/api/servers/:id/members/:username/remove',
+  requireAuth,
+  friendLimiter,
+  asyncRoute(async (req, res) => {
+    const serverId = Number(req.params.id);
+    const ctx = await requireServerMembership(req, res, serverId);
+    if (!ctx) return;
+    const targetUsername = req.params.username;
+    if (!isValidUsername(targetUsername)) return res.status(400).json({ error: 'gecersiz kullanici adi' });
+    const target = await db.getUserByUsername(targetUsername);
+    if (!target) return res.status(404).json({ error: 'kullanici bulunamadi' });
+    if (target.id === req.userId) return res.status(400).json({ error: 'kendini bu yoldan cikaramazsin' });
+    const targetMember = await db.getServerMember(serverId, target.id);
+    if (!targetMember) return res.status(404).json({ error: 'kullanici bu sunucunun uyesi degil' });
+
+    const requesterIsOwner = ctx.member.role === 'owner';
+    const requesterIsMod = ctx.member.role === 'moderator';
+    if (targetMember.role === 'owner') return res.status(403).json({ error: 'sahip cikarilamaz' });
+    if (!requesterIsOwner && !(requesterIsMod && targetMember.role === 'member')) {
+      return res.status(403).json({ error: 'bu kullaniciyi cikarma yetkin yok' });
+    }
+
+    await db.removeServerMember(serverId, target.id);
+    kickUserFromServerVoiceChannels(serverId, target.id);
+    emitToUser(target.username, 'server-removed', { serverId });
+    res.json({ ok: true });
+  })
+);
+
+app.post(
+  '/api/servers/:id/leave',
+  requireAuth,
+  friendLimiter,
+  asyncRoute(async (req, res) => {
+    const serverId = Number(req.params.id);
+    const ctx = await requireServerMembership(req, res, serverId);
+    if (!ctx) return;
+    if (ctx.member.role === 'owner') {
+      return res.status(400).json({ error: 'sahip sunucudan ayrilamaz; silmek istersen sunucuyu sil' });
+    }
+    await db.removeServerMember(serverId, req.userId);
+    kickUserFromServerVoiceChannels(serverId, req.userId);
+    res.json({ ok: true });
+  })
+);
+
+app.delete(
+  '/api/servers/:id',
+  requireAuth,
+  asyncRoute(async (req, res) => {
+    const serverId = Number(req.params.id);
+    const ctx = await requireServerMembership(req, res, serverId);
+    if (!ctx) return;
+    if (ctx.member.role !== 'owner') return res.status(403).json({ error: 'yalnizca sahip sunucuyu silebilir' });
+
+    const members = await db.listServerMembers(serverId);
+    const channels = await db.listChannels(serverId);
+    for (const c of channels) {
+      const roomCode = `CH${c.id}`;
+      const room = rooms.get(roomCode);
+      if (room) {
+        for (const sid of [...room.members]) forceKickFromRoom(roomCode, sid);
+        rooms.delete(roomCode);
+      }
+    }
+    await db.deleteServer(serverId);
+    for (const m of members) {
+      if (m.username.toLowerCase() !== req.username.toLowerCase()) emitToUser(m.username, 'server-removed', { serverId });
+    }
+    res.json({ ok: true });
+  })
+);
+
 app.use((err, _req, res, next) => {
   if (err) return res.status(400).json({ error: 'gecersiz istek' });
   next();
@@ -643,7 +954,7 @@ io.use(async (socket, next) => {
 io.on('connection', (socket) => {
   const { userId, username } = socket.data;
   const usernameKey = username.toLowerCase();
-  let currentRoom = null;
+  socket.data.currentRoom = null;
   let lastCallAttempt = 0;
   let chatTimestamps = [];
   let dmTimestamps = [];
@@ -654,19 +965,19 @@ io.on('connection', (socket) => {
   if (cameOnline) notifyFriends(userId, 'friend-online', { username }).catch((err) => console.error(err.message));
 
   function leaveCurrentRoom() {
-    if (!currentRoom) return;
-    const room = rooms.get(currentRoom);
+    if (!socket.data.currentRoom) return;
+    const room = rooms.get(socket.data.currentRoom);
     if (room) {
       room.members.delete(socket.id);
-      socket.to(currentRoom).emit('peer-left', { id: socket.id });
-      if (room.ownerUserId && ownerActiveRoom.get(room.ownerUserId) === currentRoom && !isOwnerInRoom(room)) {
+      socket.to(socket.data.currentRoom).emit('peer-left', { id: socket.id });
+      if (room.ownerUserId && ownerActiveRoom.get(room.ownerUserId) === socket.data.currentRoom && !isOwnerInRoom(room)) {
         ownerActiveRoom.delete(room.ownerUserId);
       }
-      cleanupEmptyRoom(currentRoom);
+      cleanupEmptyRoom(socket.data.currentRoom);
       refreshOwnerRoomStatus(room);
     }
-    socket.leave(currentRoom);
-    currentRoom = null;
+    socket.leave(socket.data.currentRoom);
+    socket.data.currentRoom = null;
   }
 
   socket.on('create-room', (payload, ack) => {
@@ -692,12 +1003,12 @@ io.on('connection', (socket) => {
       const otherSession = [...room.members].some((sid) => sid !== socket.id && io.sockets.sockets.get(sid)?.data.userId === userId);
       if (otherSession) return ack({ error: 'bu gorusme baska cihazinda acik' });
     }
-    if (currentRoom === roomCode) {
+    if (socket.data.currentRoom === roomCode) {
       return ack({ ok: true, roomCode, roomType: room.type, existingPeers: [...room.members].filter((sid) => sid !== socket.id).map((id) => ({ id, displayName: io.sockets.sockets.get(id)?.data.username || 'Bilinmeyen', avatarId: io.sockets.sockets.get(id)?.data.avatarId || 'panda' })), chatHistory: room.messages, isOwner: room.ownerUserId === userId, access: room.type === 'room' ? room.access : null });
     }
 
     leaveCurrentRoom();
-    currentRoom = roomCode;
+    socket.data.currentRoom = roomCode;
     chatTimestamps = [];
     socket.join(roomCode);
 
@@ -727,10 +1038,62 @@ io.on('connection', (socket) => {
 
   socket.on('leave-room', () => leaveCurrentRoom());
 
+  socket.on('join-server-channel', (payload, ack) => {
+    if (typeof ack !== 'function') ack = () => {};
+    const channelId = Number(payload && payload.channelId);
+    if (!Number.isInteger(channelId) || channelId <= 0) return ack({ error: 'gecersiz kanal' });
+
+    (async () => {
+      const channel = await db.getChannelById(channelId);
+      if (!channel || channel.type !== 'voice') return ack({ error: 'kanal bulunamadi' });
+      const member = await db.getServerMember(channel.server_id, userId);
+      if (!member) return ack({ error: 'bu sunucunun uyesi degilsin' });
+
+      const roomCode = getOrCreateChannelRoom(channel);
+      const room = rooms.get(roomCode);
+
+      if (socket.data.currentRoom === roomCode) {
+        return ack({
+          ok: true,
+          roomCode,
+          roomType: room.type,
+          channelName: channel.name,
+          existingPeers: [...room.members]
+            .filter((sid) => sid !== socket.id)
+            .map((id) => ({
+              id,
+              displayName: io.sockets.sockets.get(id)?.data.username || 'Bilinmeyen',
+              avatarId: io.sockets.sockets.get(id)?.data.avatarId || 'panda',
+            })),
+          chatHistory: room.messages,
+        });
+      }
+
+      leaveCurrentRoom();
+      socket.data.currentRoom = roomCode;
+      chatTimestamps = [];
+      socket.join(roomCode);
+
+      const existingPeers = [...room.members].map((id) => ({
+        id,
+        displayName: io.sockets.sockets.get(id)?.data.username || 'Bilinmeyen',
+        avatarId: io.sockets.sockets.get(id)?.data.avatarId || 'panda',
+      }));
+
+      room.members.add(socket.id);
+      socket.to(roomCode).emit('peer-joined', { id: socket.id, displayName: username, avatarId: socket.data.avatarId });
+
+      ack({ ok: true, roomCode, roomType: room.type, channelName: channel.name, existingPeers, chatHistory: room.messages });
+    })().catch((err) => {
+      console.error('join-server-channel hatasi:', err.message);
+      ack({ error: 'sunucu hatasi' });
+    });
+  });
+
   socket.on('set-room-access', (payload, ack) => {
     if (typeof ack !== 'function') ack = () => {};
-    if (!currentRoom) return ack({ error: 'bir odada degilsin' });
-    const room = rooms.get(currentRoom);
+    if (!socket.data.currentRoom) return ack({ error: 'bir odada degilsin' });
+    const room = rooms.get(socket.data.currentRoom);
     if (!room || room.type !== 'room' || room.ownerUserId !== userId) {
       return ack({ error: 'sadece oda sahibi erisimi degistirebilir' });
     }
@@ -764,8 +1127,8 @@ io.on('connection', (socket) => {
 
   socket.on('signal', (payload) => {
     const { to, data } = payload || {};
-    if (!currentRoom) return;
-    const room = rooms.get(currentRoom);
+    if (!socket.data.currentRoom) return;
+    const room = rooms.get(socket.data.currentRoom);
     if (!room || !room.members.has(socket.id) || typeof to !== 'string' || !room.members.has(to)) return;
     if (!isValidSignalData(data)) return;
     io.to(to).emit('signal', { from: socket.id, data });
@@ -773,8 +1136,8 @@ io.on('connection', (socket) => {
 
   socket.on('chat-message', (payload, ack) => {
     if (typeof ack !== 'function') ack = () => {};
-    if (!currentRoom) return ack({ error: 'bir odada degilsin' });
-    const room = rooms.get(currentRoom);
+    if (!socket.data.currentRoom) return ack({ error: 'bir odada degilsin' });
+    const room = rooms.get(socket.data.currentRoom);
     if (!room || !room.members.has(socket.id)) return ack({ error: 'oda bulunamadi' });
 
     const { text, clientMessageId } = payload || {};
@@ -804,40 +1167,50 @@ io.on('connection', (socket) => {
       room.seenClientIds.delete(room.seenClientIds.keys().next().value);
     }
 
-    socket.to(currentRoom).emit('chat-message', message);
+    socket.to(socket.data.currentRoom).emit('chat-message', message);
     ack({ ok: true, message });
   });
 
   socket.on('kick-participant', (payload, ack) => {
     if (typeof ack !== 'function') ack = () => {};
-    if (!currentRoom) return ack({ error: 'bir odada degilsin' });
-    const room = rooms.get(currentRoom);
-    if (!room || room.type !== 'room' || room.ownerUserId !== userId) {
-      return ack({ error: 'sadece oda sahibi birini atabilir' });
-    }
+    if (!socket.data.currentRoom) return ack({ error: 'bir odada degilsin' });
+    const room = rooms.get(socket.data.currentRoom);
+    if (!room) return ack({ error: 'oda bulunamadi' });
 
     const { targetSocketId } = payload || {};
     if (typeof targetSocketId !== 'string' || targetSocketId.length === 0) {
       return ack({ error: 'gecersiz istek' });
     }
     if (targetSocketId === socket.id) return ack({ error: 'kendini atamazsin' });
-    if (!room.members.has(targetSocketId)) return ack({ error: 'kullanici bu odada degil' });
 
-    // Uyelik kaydini hemen kaldiriyoruz ki (a) sayimlar/durum tutarli kalsin
-    // ve (b) atilan kullanici kendi 'leave-room' cagrisini hic yapmasa bile
-    // (degistirilmis/isbirligi yapmayan bir istemci) diger herkes ona olan
-    // WebRTC baglantisini derhal kapatsin - ses P2P aktigi icin asil
-    // yaptirim budur, atilan tarafin kendi istemcisine guvenilmez.
-    room.members.delete(targetSocketId);
-    socket.to(currentRoom).emit('peer-left', { id: targetSocketId });
-
-    const targetSocket = io.sockets.sockets.get(targetSocketId);
-    if (targetSocket) {
-      targetSocket.leave(currentRoom);
-      targetSocket.emit('kicked-from-room', { roomCode: currentRoom });
+    // Uyelik/yetki kontrolunden sonra gercek yaptirim (P2P baglanti kesme)
+    // forceKickFromRoom'da: atilan tarafin kendi istemcisine guvenilmez,
+    // digerlerine 'peer-left' yayinlanmasi asil yaptirimdir.
+    if (room.type === 'room') {
+      if (room.ownerUserId !== userId) return ack({ error: 'sadece oda sahibi birini atabilir' });
+      if (!room.members.has(targetSocketId)) return ack({ error: 'kullanici bu odada degil' });
+      forceKickFromRoom(socket.data.currentRoom, targetSocketId);
+      return ack({ ok: true });
     }
 
-    ack({ ok: true });
+    if (room.type === 'server-channel') {
+      if (!room.members.has(targetSocketId)) return ack({ error: 'kullanici bu odada degil' });
+      db.getServerMember(room.serverId, userId)
+        .then((member) => {
+          if (!member || (member.role !== 'owner' && member.role !== 'moderator')) {
+            return ack({ error: 'yetkin yok' });
+          }
+          forceKickFromRoom(socket.data.currentRoom, targetSocketId);
+          ack({ ok: true });
+        })
+        .catch((err) => {
+          console.error('kick-participant hatasi:', err.message);
+          ack({ error: 'sunucu hatasi' });
+        });
+      return;
+    }
+
+    ack({ error: 'bu oda tipinde atma islemi desteklenmiyor' });
   });
 
   socket.on('dm-message', (payload, ack) => {
