@@ -85,6 +85,25 @@ contextBridge.exposeInMainWorld('api', {
     return () => ipcRenderer.removeListener('notification-dm-clicked', listener);
   },
 
+  notifyCommunityMessage: (data) => {
+    const { serverId, channelId, channelName, fromUsername, text, showContent } = data || {};
+    if (
+      Number.isInteger(serverId) &&
+      Number.isInteger(channelId) &&
+      typeof channelName === 'string' &&
+      typeof fromUsername === 'string' &&
+      typeof text === 'string'
+    ) {
+      ipcRenderer.send('notify-community-message', { serverId, channelId, channelName, fromUsername, text, showContent: !!showContent });
+    }
+  },
+
+  onNotificationCommunityClicked: (callback) => {
+    const listener = (_event, payload) => callback(payload);
+    ipcRenderer.on('notification-community-clicked', listener);
+    return () => ipcRenderer.removeListener('notification-community-clicked', listener);
+  },
+
   getLaunchAtLogin: () => ipcRenderer.invoke('get-launch-at-login'),
 
   setLaunchAtLogin: (value) => ipcRenderer.send('set-launch-at-login', !!value),

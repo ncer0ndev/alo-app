@@ -185,7 +185,11 @@ test('sunucular: sesli kanala katilim uyelik gerektirir, moderator/sahip odadan 
   ).json();
   await fetch(`${base}/api/servers/join`, { method: 'POST', headers: jsonAuth(member.token), body: JSON.stringify({ inviteCode: created.inviteCode }) });
   const channel = await (
-    await fetch(`${base}/api/servers/${created.id}/channels`, { method: 'POST', headers: jsonAuth(owner.token), body: JSON.stringify({ name: 'Oyun' }) })
+    await fetch(`${base}/api/servers/${created.id}/channels`, {
+      method: 'POST',
+      headers: jsonAuth(owner.token),
+      body: JSON.stringify({ name: 'Oyun', type: 'voice' }),
+    })
   ).json();
 
   // Uye olmayan kanala katilamaz.
@@ -226,4 +230,58 @@ test('sunucular: sesli kanala katilim uyelik gerektirir, moderator/sahip odadan 
   // Sunucudan cikarildiktan sonra kanala tekrar katilamaz.
   const rejoinAfterRemoval = await emit(member.socket, 'join-server-channel', { channelId: channel.id });
   assert.ok(rejoinAfterRemoval.error);
+});
+
+test('topluluk canli durumu: uye cevrimici bilgisi ve ses kanali kisi sayisi anlik yayinlanir', { timeout: 20000 }, async () => {
+  await ready;
+  const base = `http://127.0.0.1:${server.address().port}`;
+  const owner = await makeUser(base, 'liveOwner');
+  const member = await makeUser(base, 'liveMember');
+
+  const created = await (
+    await fetch(`${base}/api/servers`, {
+      method: 'POST',
+      headers: jsonAuth(owner.token),
+      body: JSON.stringify({ name: 'Canli Topluluk' }),
+    })
+  ).json();
+  await fetch(`${base}/api/servers/join`, {
+    method: 'POST',
+    headers: jsonAuth(member.token),
+    body: JSON.stringify({ inviteCode: created.inviteCode }),
+  });
+
+  const initialDetail = await (await fetch(`${base}/api/servers/${created.id}`, { headers: owner.auth })).json();
+  assert.equal(initialDetail.members.find((item) => item.username === member.username).online, true);
+
+  const wentOffline = event(owner.socket, 'server-member-presence');
+  member.socket.disconnect();
+  assert.deepEqual(await wentOffline, { serverId: created.id, username: member.username, online: false });
+
+  const cameOnline = event(owner.socket, 'server-member-presence');
+  const reconnected = connect(base, { auth: { token: member.token }, reconnection: false, forceNew: true });
+  sockets.push(reconnected);
+  member.socket = reconnected;
+  await event(reconnected, 'authenticated');
+  assert.deepEqual(await cameOnline, { serverId: created.id, username: member.username, online: true });
+
+  const channel = await (
+    await fetch(`${base}/api/servers/${created.id}/channels`, {
+      method: 'POST',
+      headers: jsonAuth(owner.token),
+      body: JSON.stringify({ name: 'Canli Ses', type: 'voice' }),
+    })
+  ).json();
+
+  const ownerCount = event(owner.socket, 'server-channel-count');
+  assert.equal((await emit(owner.socket, 'join-server-channel', { channelId: channel.id })).ok, true);
+  assert.deepEqual(await ownerCount, { serverId: created.id, channelId: channel.id, memberCount: 1 });
+
+  const joinedCount = event(owner.socket, 'server-channel-count');
+  assert.equal((await emit(member.socket, 'join-server-channel', { channelId: channel.id })).ok, true);
+  assert.deepEqual(await joinedCount, { serverId: created.id, channelId: channel.id, memberCount: 2 });
+
+  const leftCount = event(owner.socket, 'server-channel-count');
+  member.socket.emit('leave-room');
+  assert.deepEqual(await leftCount, { serverId: created.id, channelId: channel.id, memberCount: 1 });
 });

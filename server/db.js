@@ -83,6 +83,10 @@ async function createSchema() {
       created_at TEXT NOT NULL DEFAULT (datetime('now'))
     )
   `);
+  const serverColumns = await client.execute('PRAGMA table_info(servers)');
+  if (!serverColumns.rows.some((column) => column.name === 'icon_id')) {
+    await client.execute("ALTER TABLE servers ADD COLUMN icon_id TEXT NOT NULL DEFAULT 'robot'");
+  }
   await client.execute(`
     CREATE TABLE IF NOT EXISTS server_members (
       server_id INTEGER NOT NULL REFERENCES servers(id) ON DELETE CASCADE,
@@ -101,8 +105,81 @@ async function createSchema() {
       created_at TEXT NOT NULL DEFAULT (datetime('now'))
     )
   `);
+  const channelColumns = await client.execute('PRAGMA table_info(server_channels)');
+  if (!channelColumns.rows.some((column) => column.name === 'position')) {
+    await client.execute('ALTER TABLE server_channels ADD COLUMN position INTEGER NOT NULL DEFAULT 0');
+    await client.execute('UPDATE server_channels SET position = id');
+  }
   await client.execute('CREATE INDEX IF NOT EXISTS idx_server_channels_server ON server_channels(server_id)');
   await client.execute('CREATE INDEX IF NOT EXISTS idx_server_members_user ON server_members(user_id)');
+  await client.execute(`
+    CREATE TABLE IF NOT EXISTS server_messages (
+      id TEXT PRIMARY KEY,
+      server_id INTEGER NOT NULL REFERENCES servers(id) ON DELETE CASCADE,
+      channel_id INTEGER NOT NULL REFERENCES server_channels(id) ON DELETE CASCADE,
+      from_user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      text TEXT NOT NULL,
+      client_message_id TEXT,
+      created_at INTEGER NOT NULL
+    )
+  `);
+  await client.execute('CREATE INDEX IF NOT EXISTS idx_server_messages_channel ON server_messages(channel_id, created_at)');
+  await client.execute(
+    'CREATE UNIQUE INDEX IF NOT EXISTS idx_server_messages_client_id ON server_messages(channel_id, client_message_id) WHERE client_message_id IS NOT NULL'
+  );
+  await client.execute(`
+    CREATE TABLE IF NOT EXISTS server_channel_read_state (
+      user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      channel_id INTEGER NOT NULL REFERENCES server_channels(id) ON DELETE CASCADE,
+      last_read_at INTEGER NOT NULL DEFAULT 0,
+      PRIMARY KEY (user_id, channel_id)
+    )
+  `);
+  await client.execute(`
+    CREATE TABLE IF NOT EXISTS server_bans (
+      server_id INTEGER NOT NULL REFERENCES servers(id) ON DELETE CASCADE,
+      user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      banned_by_user_id INTEGER NOT NULL REFERENCES users(id),
+      reason TEXT NOT NULL DEFAULT '',
+      created_at INTEGER NOT NULL,
+      PRIMARY KEY (server_id, user_id)
+    )
+  `);
+  await client.execute(`
+    CREATE TABLE IF NOT EXISTS user_blocks (
+      blocker_user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      blocked_user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      created_at INTEGER NOT NULL,
+      PRIMARY KEY (blocker_user_id, blocked_user_id),
+      CHECK (blocker_user_id <> blocked_user_id)
+    )
+  `);
+  await client.execute(`
+    CREATE TABLE IF NOT EXISTS user_reports (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      reporter_user_id INTEGER NOT NULL REFERENCES users(id),
+      reported_user_id INTEGER NOT NULL REFERENCES users(id),
+      server_id INTEGER REFERENCES servers(id) ON DELETE SET NULL,
+      reason TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'open',
+      created_at INTEGER NOT NULL
+    )
+  `);
+  await client.execute(`
+    CREATE TABLE IF NOT EXISTS server_audit_log (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      server_id INTEGER NOT NULL REFERENCES servers(id) ON DELETE CASCADE,
+      actor_user_id INTEGER NOT NULL REFERENCES users(id),
+      action TEXT NOT NULL,
+      target TEXT NOT NULL DEFAULT '',
+      details TEXT NOT NULL DEFAULT '',
+      created_at INTEGER NOT NULL
+    )
+  `);
+  await client.execute('CREATE INDEX IF NOT EXISTS idx_server_bans_server ON server_bans(server_id, created_at)');
+  await client.execute('CREATE INDEX IF NOT EXISTS idx_user_blocks_blocked ON user_blocks(blocked_user_id)');
+  await client.execute('CREATE INDEX IF NOT EXISTS idx_user_reports_status ON user_reports(status, created_at)');
+  await client.execute('CREATE INDEX IF NOT EXISTS idx_server_audit_server ON server_audit_log(server_id, created_at)');
 }
 
 async function countUsers() {
@@ -498,7 +575,7 @@ async function setServerMemberRole(serverId, userId, role) {
 
 async function listServersForUser(userId) {
   const res = await client.execute({
-    sql: `SELECT s.id, s.name, s.owner_user_id, s.invite_code, s.created_at, m.role
+    sql: `SELECT s.id, s.name, s.icon_id, s.owner_user_id, s.invite_code, s.created_at, m.role
           FROM server_members m JOIN servers s ON s.id = m.server_id
           WHERE m.user_id = ?
           ORDER BY s.created_at ASC`,
@@ -533,8 +610,18 @@ async function regenerateInviteCode(serverId) {
 }
 
 async function deleteServer(serverId) {
+  // Yabanci anahtarlar bu istemcide zorlanmadigindan (PRAGMA foreign_keys
+  // kapali), kaskad silme acikca elle yapiliyor.
   await client.batch(
     [
+      {
+        sql: 'DELETE FROM server_channel_read_state WHERE channel_id IN (SELECT id FROM server_channels WHERE server_id = ?)',
+        args: [serverId],
+      },
+      { sql: 'DELETE FROM server_messages WHERE server_id = ?', args: [serverId] },
+      { sql: 'DELETE FROM server_audit_log WHERE server_id = ?', args: [serverId] },
+      { sql: 'DELETE FROM server_bans WHERE server_id = ?', args: [serverId] },
+      { sql: 'UPDATE user_reports SET server_id = NULL WHERE server_id = ?', args: [serverId] },
       { sql: 'DELETE FROM server_channels WHERE server_id = ?', args: [serverId] },
       { sql: 'DELETE FROM server_members WHERE server_id = ?', args: [serverId] },
       { sql: 'DELETE FROM servers WHERE id = ?', args: [serverId] },
@@ -543,10 +630,11 @@ async function deleteServer(serverId) {
   );
 }
 
-async function createChannel(serverId, name, type = 'voice') {
+async function createChannel(serverId, name, type = 'text') {
   const result = await client.execute({
-    sql: 'INSERT INTO server_channels (server_id, name, type) VALUES (?, ?, ?)',
-    args: [serverId, name, type],
+    sql: `INSERT INTO server_channels (server_id, name, type, position)
+          VALUES (?, ?, ?, (SELECT COALESCE(MAX(position), -1) + 1 FROM server_channels WHERE server_id = ?))`,
+    args: [serverId, name, type, serverId],
   });
   return Number(result.lastInsertRowid);
 }
@@ -554,8 +642,8 @@ async function createChannel(serverId, name, type = 'voice') {
 async function listChannels(serverId, type) {
   const res = await client.execute(
     type
-      ? { sql: 'SELECT * FROM server_channels WHERE server_id = ? AND type = ? ORDER BY id ASC', args: [serverId, type] }
-      : { sql: 'SELECT * FROM server_channels WHERE server_id = ? ORDER BY id ASC', args: [serverId] }
+      ? { sql: 'SELECT * FROM server_channels WHERE server_id = ? AND type = ? ORDER BY position ASC, id ASC', args: [serverId, type] }
+      : { sql: 'SELECT * FROM server_channels WHERE server_id = ? ORDER BY position ASC, id ASC', args: [serverId] }
   );
   return res.rows;
 }
@@ -566,7 +654,256 @@ async function getChannelById(id) {
 }
 
 async function deleteChannel(channelId) {
-  await client.execute({ sql: 'DELETE FROM server_channels WHERE id = ?', args: [channelId] });
+  // Yabanci anahtarlar bu istemcide zorlanmadigindan, kaskad silme elle yapiliyor.
+  await client.batch(
+    [
+      { sql: 'DELETE FROM server_channel_read_state WHERE channel_id = ?', args: [channelId] },
+      { sql: 'DELETE FROM server_messages WHERE channel_id = ?', args: [channelId] },
+      { sql: 'DELETE FROM server_channels WHERE id = ?', args: [channelId] },
+    ],
+    'write'
+  );
+}
+
+async function updateServerProfile(serverId, { name, iconId }) {
+  await client.execute({ sql: 'UPDATE servers SET name = ?, icon_id = ? WHERE id = ?', args: [name, iconId, serverId] });
+}
+
+async function renameChannel(channelId, name) {
+  await client.execute({ sql: 'UPDATE server_channels SET name = ? WHERE id = ?', args: [name, channelId] });
+}
+
+async function reorderChannels(serverId, channelIds) {
+  await client.batch(
+    channelIds.map((channelId, position) => ({
+      sql: 'UPDATE server_channels SET position = ? WHERE id = ? AND server_id = ?',
+      args: [position, channelId, serverId],
+    })),
+    'write'
+  );
+}
+
+async function transferServerOwnership(serverId, currentOwnerId, newOwnerId) {
+  await client.batch(
+    [
+      { sql: "UPDATE server_members SET role = 'member' WHERE server_id = ? AND user_id = ?", args: [serverId, currentOwnerId] },
+      { sql: "UPDATE server_members SET role = 'owner' WHERE server_id = ? AND user_id = ?", args: [serverId, newOwnerId] },
+      { sql: 'UPDATE servers SET owner_user_id = ? WHERE id = ? AND owner_user_id = ?', args: [newOwnerId, serverId, currentOwnerId] },
+    ],
+    'write'
+  );
+}
+
+async function getServerBan(serverId, userId) {
+  const res = await client.execute({ sql: 'SELECT * FROM server_bans WHERE server_id = ? AND user_id = ?', args: [serverId, userId] });
+  return res.rows[0] || null;
+}
+
+async function banServerMember(serverId, userId, bannedByUserId, reason) {
+  await client.batch(
+    [
+      {
+        sql: `INSERT INTO server_bans (server_id, user_id, banned_by_user_id, reason, created_at)
+              VALUES (?, ?, ?, ?, ?)
+              ON CONFLICT(server_id, user_id) DO UPDATE SET banned_by_user_id = excluded.banned_by_user_id,
+                reason = excluded.reason, created_at = excluded.created_at`,
+        args: [serverId, userId, bannedByUserId, reason, Date.now()],
+      },
+      { sql: 'DELETE FROM server_members WHERE server_id = ? AND user_id = ?', args: [serverId, userId] },
+    ],
+    'write'
+  );
+}
+
+async function unbanServerMember(serverId, userId) {
+  await client.execute({ sql: 'DELETE FROM server_bans WHERE server_id = ? AND user_id = ?', args: [serverId, userId] });
+}
+
+async function listServerBans(serverId) {
+  const res = await client.execute({
+    sql: `SELECT u.username, u.avatar_id, b.reason, b.created_at, actor.username AS banned_by
+          FROM server_bans b JOIN users u ON u.id = b.user_id JOIN users actor ON actor.id = b.banned_by_user_id
+          WHERE b.server_id = ? ORDER BY b.created_at DESC`,
+    args: [serverId],
+  });
+  return res.rows;
+}
+
+async function blockUser(blockerUserId, blockedUserId) {
+  const a = Math.min(blockerUserId, blockedUserId);
+  const b = Math.max(blockerUserId, blockedUserId);
+  await client.batch(
+    [
+      { sql: 'INSERT OR IGNORE INTO user_blocks (blocker_user_id, blocked_user_id, created_at) VALUES (?, ?, ?)', args: [blockerUserId, blockedUserId, Date.now()] },
+      { sql: 'DELETE FROM friendships WHERE user_a_id = ? AND user_b_id = ?', args: [a, b] },
+      { sql: 'DELETE FROM friend_requests WHERE (from_user_id = ? AND to_user_id = ?) OR (from_user_id = ? AND to_user_id = ?)', args: [blockerUserId, blockedUserId, blockedUserId, blockerUserId] },
+    ],
+    'write'
+  );
+}
+
+async function unblockUser(blockerUserId, blockedUserId) {
+  await client.execute({ sql: 'DELETE FROM user_blocks WHERE blocker_user_id = ? AND blocked_user_id = ?', args: [blockerUserId, blockedUserId] });
+}
+
+async function isEitherUserBlocked(userAId, userBId) {
+  const res = await client.execute({
+    sql: `SELECT 1 FROM user_blocks WHERE (blocker_user_id = ? AND blocked_user_id = ?)
+          OR (blocker_user_id = ? AND blocked_user_id = ?) LIMIT 1`,
+    args: [userAId, userBId, userBId, userAId],
+  });
+  return res.rows.length > 0;
+}
+
+async function listBlockedUsers(userId) {
+  const res = await client.execute({
+    sql: `SELECT u.username, u.avatar_id, b.created_at FROM user_blocks b
+          JOIN users u ON u.id = b.blocked_user_id WHERE b.blocker_user_id = ? ORDER BY b.created_at DESC`,
+    args: [userId],
+  });
+  return res.rows;
+}
+
+async function createUserReport(reporterUserId, reportedUserId, serverId, reason) {
+  await client.execute({
+    sql: 'INSERT INTO user_reports (reporter_user_id, reported_user_id, server_id, reason, created_at) VALUES (?, ?, ?, ?, ?)',
+    args: [reporterUserId, reportedUserId, serverId || null, reason, Date.now()],
+  });
+}
+
+async function listOpenReports() {
+  const res = await client.execute({
+    sql: `SELECT r.id, reporter.username AS reporter, reported.username AS reported, r.server_id, r.reason, r.status, r.created_at
+          FROM user_reports r JOIN users reporter ON reporter.id = r.reporter_user_id
+          JOIN users reported ON reported.id = r.reported_user_id
+          WHERE r.status = 'open' ORDER BY r.created_at DESC LIMIT 200`,
+  });
+  return res.rows;
+}
+
+async function resolveUserReport(reportId) {
+  const result = await client.execute({
+    sql: "UPDATE user_reports SET status = 'resolved' WHERE id = ? AND status = 'open'",
+    args: [reportId],
+  });
+  return Number(result.rowsAffected) > 0;
+}
+
+async function addServerAuditLog(serverId, actorUserId, action, target = '', details = '') {
+  await client.execute({
+    sql: 'INSERT INTO server_audit_log (server_id, actor_user_id, action, target, details, created_at) VALUES (?, ?, ?, ?, ?, ?)',
+    args: [serverId, actorUserId, action, target, details, Date.now()],
+  });
+}
+
+async function listServerAuditLog(serverId, limit = 100) {
+  const res = await client.execute({
+    sql: `SELECT a.id, u.username AS actor, a.action, a.target, a.details, a.created_at
+          FROM server_audit_log a JOIN users u ON u.id = a.actor_user_id
+          WHERE a.server_id = ? ORDER BY a.created_at DESC LIMIT ?`,
+    args: [serverId, limit],
+  });
+  return res.rows;
+}
+
+// ---- topluluk metin kanali mesajlari ----
+
+async function insertServerMessage({ id, serverId, channelId, fromUserId, text, createdAt, clientMessageId }) {
+  try {
+    await client.execute({
+      sql: `INSERT INTO server_messages (id, server_id, channel_id, from_user_id, text, client_message_id, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      args: [id, serverId, channelId, fromUserId, text, clientMessageId || null, createdAt],
+    });
+    return { id, duplicate: false };
+  } catch (err) {
+    if (isUniqueViolation(err) && clientMessageId) {
+      const res = await client.execute({
+        sql: 'SELECT id FROM server_messages WHERE channel_id = ? AND client_message_id = ?',
+        args: [channelId, clientMessageId],
+      });
+      if (res.rows[0]) return { id: res.rows[0].id, duplicate: true };
+    }
+    throw err;
+  }
+}
+
+async function getServerMessageById(id) {
+  const res = await client.execute({
+    sql: `SELECT m.*, u.username, u.avatar_id FROM server_messages m
+          JOIN users u ON u.id = m.from_user_id
+          WHERE m.id = ?`,
+    args: [id],
+  });
+  return res.rows[0] || null;
+}
+
+async function getServerMessages(channelId, { before, limit = 50 } = {}) {
+  const args = [channelId];
+  let sql = `SELECT m.id, m.from_user_id, m.text, m.created_at, u.username, u.avatar_id FROM server_messages m
+             JOIN users u ON u.id = m.from_user_id
+             WHERE m.channel_id = ?`;
+  if (typeof before === 'number') {
+    sql += ' AND m.created_at < ?';
+    args.push(before);
+  }
+  sql += ' ORDER BY m.created_at DESC LIMIT ?';
+  args.push(limit);
+  const res = await client.execute({ sql, args });
+  return res.rows.reverse();
+}
+
+async function deleteServerMessage(id) {
+  await client.execute({ sql: 'DELETE FROM server_messages WHERE id = ?', args: [id] });
+}
+
+async function getChannelReadState(userId, channelId) {
+  const res = await client.execute({
+    sql: 'SELECT last_read_at FROM server_channel_read_state WHERE user_id = ? AND channel_id = ?',
+    args: [userId, channelId],
+  });
+  return res.rows[0] ? Number(res.rows[0].last_read_at) : 0;
+}
+
+async function markChannelRead(userId, channelId, ts) {
+  await client.execute({
+    sql: `INSERT INTO server_channel_read_state (user_id, channel_id, last_read_at) VALUES (?, ?, ?)
+          ON CONFLICT(user_id, channel_id) DO UPDATE SET last_read_at = MAX(last_read_at, excluded.last_read_at)`,
+    args: [userId, channelId, ts],
+  });
+}
+
+// Bir sunucudaki tum metin kanallari icin, verilen kullanicinin okunmamis
+// mesaj sayisini tek sorguda dondurur (kanal basina N+1 sorgudan kacinir).
+async function getUnreadCountsByChannel(serverId, userId) {
+  const res = await client.execute({
+    sql: `SELECT c.id AS channel_id,
+            (SELECT COUNT(*) FROM server_messages sm WHERE sm.channel_id = c.id AND sm.created_at > COALESCE(r.last_read_at, 0)) AS unread
+          FROM server_channels c
+          LEFT JOIN server_channel_read_state r ON r.channel_id = c.id AND r.user_id = ?
+          WHERE c.server_id = ? AND c.type = 'text'`,
+    args: [userId, serverId],
+  });
+  const map = new Map();
+  for (const row of res.rows) map.set(Number(row.channel_id), Number(row.unread));
+  return map;
+}
+
+// listServersForUser'a, her sunucunun metin kanallarindaki toplam okunmamis
+// mesaj sayisini ekler (topluluk sekmesindeki rozet icin).
+async function listServersForUserWithUnread(userId) {
+  const res = await client.execute({
+    sql: `SELECT s.id, s.name, s.icon_id, s.owner_user_id, s.invite_code, s.created_at, m.role,
+            (SELECT COUNT(*) FROM server_messages sm
+              JOIN server_channels ch ON ch.id = sm.channel_id AND ch.type = 'text' AND ch.server_id = s.id
+              LEFT JOIN server_channel_read_state r ON r.channel_id = ch.id AND r.user_id = ?
+              WHERE sm.created_at > COALESCE(r.last_read_at, 0)) AS unread_count
+          FROM server_members m JOIN servers s ON s.id = m.server_id
+          WHERE m.user_id = ?
+          ORDER BY s.created_at ASC`,
+    args: [userId, userId],
+  });
+  return res.rows;
 }
 
 module.exports = {
@@ -604,6 +941,7 @@ module.exports = {
   removeServerMember,
   setServerMemberRole,
   listServersForUser,
+  listServersForUserWithUnread,
   listServerMembers,
   regenerateInviteCode,
   deleteServer,
@@ -611,4 +949,28 @@ module.exports = {
   listChannels,
   getChannelById,
   deleteChannel,
+  insertServerMessage,
+  getServerMessageById,
+  getServerMessages,
+  deleteServerMessage,
+  getChannelReadState,
+  markChannelRead,
+  getUnreadCountsByChannel,
+  updateServerProfile,
+  renameChannel,
+  reorderChannels,
+  transferServerOwnership,
+  getServerBan,
+  banServerMember,
+  unbanServerMember,
+  listServerBans,
+  blockUser,
+  unblockUser,
+  isEitherUserBlocked,
+  listBlockedUsers,
+  createUserReport,
+  listOpenReports,
+  resolveUserReport,
+  addServerAuditLog,
+  listServerAuditLog,
 };

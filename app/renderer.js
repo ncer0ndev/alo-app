@@ -97,20 +97,61 @@ const joinServerBtn = document.getElementById('join-server-btn');
 const joinServerStatusEl = document.getElementById('join-server-status');
 const serversListEl = document.getElementById('servers-list');
 const serversEmptyEl = document.getElementById('servers-empty');
+const serversCountEl = document.getElementById('servers-count');
+const serversLoadState = document.getElementById('servers-load-state');
+const serversLoadMessage = document.getElementById('servers-load-message');
+const serversRetryBtn = document.getElementById('servers-retry-btn');
 const serverBackBtn = document.getElementById('server-back-btn');
 const serverDetailNameEl = document.getElementById('server-detail-name');
+const serverDetailIcon = document.getElementById('server-detail-icon');
 const serverInviteSection = document.getElementById('server-invite-section');
 const serverInviteCodeEl = document.getElementById('server-invite-code');
 const copyServerInviteBtn = document.getElementById('copy-server-invite-btn');
 const regenServerInviteBtn = document.getElementById('regen-server-invite-btn');
-const serverChannelsList = document.getElementById('server-channels-list');
+const serverChannelsView = document.getElementById('server-channels-view');
+const serverTextChannelsList = document.getElementById('server-text-channels-list');
+const serverTextChannelsEmpty = document.getElementById('server-text-channels-empty');
+const serverVoiceChannelsList = document.getElementById('server-voice-channels-list');
+const serverVoiceChannelsEmpty = document.getElementById('server-voice-channels-empty');
 const createChannelSection = document.getElementById('create-channel-section');
+const createChannelTypeSelect = document.getElementById('create-channel-type-select');
 const createChannelNameInput = document.getElementById('create-channel-name-input');
 const createChannelBtn = document.getElementById('create-channel-btn');
+const serversTabBadge = document.getElementById('servers-tab-badge');
+
+const serverTextChannelView = document.getElementById('server-text-channel-view');
+const textChannelBackBtn = document.getElementById('text-channel-back-btn');
+const textChannelNameEl = document.getElementById('text-channel-name');
+const textChannelLoadState = document.getElementById('text-channel-load-state');
+const textChannelLoadMessage = document.getElementById('text-channel-load-message');
+const textChannelRetryBtn = document.getElementById('text-channel-retry-btn');
+const textChannelLogEl = document.getElementById('text-channel-log');
+const textChannelEmptyEl = document.getElementById('text-channel-empty');
+const textChannelScrollBtn = document.getElementById('text-channel-scroll-btn');
+const textChannelInput = document.getElementById('text-channel-input');
+const textChannelSendBtn = document.getElementById('text-channel-send-btn');
 const serverMembersList = document.getElementById('server-members-list');
+const serverMembersPanel = document.getElementById('server-members-panel');
+const serverMembersCountEl = document.getElementById('server-members-count');
+const serverDetailLoadState = document.getElementById('server-detail-load-state');
+const serverDetailLoadMessage = document.getElementById('server-detail-load-message');
+const serverDetailRetryBtn = document.getElementById('server-detail-retry-btn');
 const leaveServerBtn = document.getElementById('leave-server-btn');
 const deleteServerBtn = document.getElementById('delete-server-btn');
 const serverDetailStatusEl = document.getElementById('server-detail-status');
+const serverManagementSection = document.getElementById('server-management-section');
+const serverModerationSection = document.getElementById('server-moderation-section');
+const serverRenameInput = document.getElementById('server-rename-input');
+const serverIconSelect = document.getElementById('server-icon-select');
+const saveServerSettingsBtn = document.getElementById('save-server-settings-btn');
+const serverTransferSelect = document.getElementById('server-transfer-select');
+const transferServerBtn = document.getElementById('transfer-server-btn');
+const loadServerBansBtn = document.getElementById('load-server-bans-btn');
+const loadServerAuditBtn = document.getElementById('load-server-audit-btn');
+const serverManagementList = document.getElementById('server-management-list');
+const blockedUsersList = document.getElementById('blocked-users-list');
+const blockedUsersEmpty = document.getElementById('blocked-users-empty');
+const adminReportsList = document.getElementById('admin-reports-list');
 
 const dmTabBadge = document.getElementById('dm-tab-badge');
 const dmListView = document.getElementById('dm-list-view');
@@ -164,6 +205,12 @@ let currentChannelServerId = null;
 let currentChannelDisplayName = null;
 let currentServerChannelRole = null;
 let activeServerDetail = null; // { id, name, role, inviteCode, members, channels }
+let currentTextChannel = null; // { serverId, channelId, name }
+let textChannelMessages = [];
+let textChannelAutoScroll = true;
+let textChannelLoadingOlder = false;
+let textChannelHasMoreHistory = true;
+const seenServerMessageIds = new Set();
 let pendingRoomSwitch = null;
 let myCurrentGame = null;
 let joining = false;
@@ -368,7 +415,10 @@ function logout() {
   dmThreadView.classList.add('hidden');
   updateDmTabBadge();
   activeServerDetail = null;
+  closeTextChannel();
+  latestServersList = [];
   serverDetailView.classList.add('hidden');
+  serverMembersPanel.classList.add('hidden');
   serversListView.classList.remove('hidden');
   showScreen(authScreen);
 }
@@ -378,7 +428,10 @@ function logout() {
 function showTab(tabName) {
   tabBtns.forEach((btn) => btn.classList.toggle('active', btn.dataset.tab === tabName));
   tabContents.forEach((content) => content.classList.toggle('hidden', content.id !== `tab-${tabName}`));
-  if (tabName === 'settings') initSettingsTab();
+  if (tabName === 'settings') {
+    initSettingsTab();
+    loadBlockedUsers();
+  }
   if (tabName === 'dm') loadDmConversations();
   if (tabName === 'admin') loadAdminUsers();
   if (tabName === 'profile') loadOwnStatusMessage();
@@ -1653,13 +1706,20 @@ function setServerDetailStatus(text, kind = 'info') {
 
 async function loadServersList() {
   const { token } = getSession();
+  serversLoadState.className = 'community-load-state';
+  serversLoadMessage.textContent = 'Topluluklar yükleniyor...';
+  serversRetryBtn.classList.add('hidden');
+  serversLoadState.classList.remove('hidden');
   try {
     const res = await fetch(`${getServerUrl()}/api/servers`, { headers: { Authorization: `Bearer ${token}` } });
-    if (!res.ok) return;
+    if (!res.ok) throw new Error('topluluklar alınamadı');
     const data = await res.json();
     renderServersList(data.servers);
+    serversLoadState.classList.add('hidden');
   } catch {
-    // sessizce yoksay, bir sonraki denemede tekrar dener
+    serversLoadState.className = 'community-load-state error';
+    serversLoadMessage.textContent = 'Topluluklar yüklenemedi.';
+    serversRetryBtn.classList.remove('hidden');
   }
 }
 
@@ -1667,14 +1727,33 @@ function serverRoleLabel(role) {
   return role === 'owner' ? 'sahip' : role === 'moderator' ? 'moderatör' : 'üye';
 }
 
+function updateServersTabBadge(servers) {
+  const total = servers.reduce((sum, s) => sum + (s.unreadCount || 0), 0);
+  if (total > 0) {
+    serversTabBadge.textContent = total > 99 ? '99+' : String(total);
+    serversTabBadge.classList.remove('hidden');
+  } else {
+    serversTabBadge.classList.add('hidden');
+  }
+}
+
 function renderServersList(servers) {
   serversListEl.innerHTML = '';
+  serversCountEl.textContent = String(servers.length);
   serversEmptyEl.classList.toggle('hidden', servers.length > 0);
+  updateServersTabBadge(servers);
   for (const s of servers) {
     const li = document.createElement('li');
-    li.className = 'friend-row';
+    li.className = `community-server-item${activeServerDetail?.id === s.id ? ' active' : ''}`;
+    li.tabIndex = 0;
+    li.setAttribute('role', 'button');
+    li.setAttribute('aria-label', `${s.name} topluluğunu aç`);
+    const badge = document.createElement('span');
+    badge.className = 'community-server-badge';
+    if (s.iconId) badge.replaceChildren(profileAvatars.imageForId(s.iconId, 'community-server-icon'));
+    else badge.textContent = s.name.trim().slice(0, 2).toUpperCase();
     const main = document.createElement('div');
-    main.className = 'dm-row-main';
+    main.className = 'community-server-copy';
     const name = document.createElement('span');
     name.className = 'name';
     name.textContent = s.name;
@@ -1682,8 +1761,20 @@ function renderServersList(servers) {
     preview.className = 'preview';
     preview.textContent = serverRoleLabel(s.role);
     main.append(name, preview);
-    li.append(main);
+    li.append(badge, main);
+    if (s.unreadCount > 0) {
+      const unread = document.createElement('span');
+      unread.className = 'unread-badge';
+      unread.textContent = s.unreadCount > 99 ? '99+' : String(s.unreadCount);
+      li.appendChild(unread);
+    }
     li.addEventListener('click', () => openServerDetail(s.id));
+    li.addEventListener('keydown', (event) => {
+      if (event.key === 'Enter' || event.key === ' ') {
+        event.preventDefault();
+        openServerDetail(s.id);
+      }
+    });
     serversListEl.appendChild(li);
   }
 }
@@ -1718,25 +1809,40 @@ async function joinServerByCode() {
 
 async function openServerDetail(serverId) {
   const { token } = getSession();
+  serverDetailLoadState.className = 'community-detail-state';
+  serverDetailLoadMessage.textContent = 'Topluluk yükleniyor...';
+  serverDetailRetryBtn.dataset.serverId = String(serverId);
+  serverDetailRetryBtn.classList.add('hidden');
+  serversListView.classList.add('hidden');
+  serverDetailView.classList.add('hidden');
+  serverMembersPanel.classList.add('hidden');
+  serverDetailLoadState.classList.remove('hidden');
   try {
     const res = await fetch(`${getServerUrl()}/api/servers/${serverId}`, { headers: { Authorization: `Bearer ${token}` } });
     const data = await res.json();
     if (!res.ok) {
-      showToast(data.error || 'sunucu açılamadı', 'error');
-      return;
+      throw new Error(data.error || 'topluluk açılamadı');
     }
     activeServerDetail = data;
     renderServerDetail();
-    serversListView.classList.add('hidden');
+    serverDetailLoadState.classList.add('hidden');
     serverDetailView.classList.remove('hidden');
+    serverMembersPanel.classList.remove('hidden');
+    if (!currentTextChannel || currentTextChannel.serverId !== serverId) showServerChannelsView();
+    loadServersList();
   } catch (err) {
-    showToast('sunucuya ulaşılamadı: ' + err.message, 'error');
+    serverDetailLoadState.className = 'community-detail-state error';
+    serverDetailLoadMessage.textContent = err.message || 'Topluluk yüklenemedi.';
+    serverDetailRetryBtn.classList.remove('hidden');
   }
 }
 
 function closeServerDetail() {
   activeServerDetail = null;
+  closeTextChannel();
+  serverDetailLoadState.classList.add('hidden');
   serverDetailView.classList.add('hidden');
+  serverMembersPanel.classList.add('hidden');
   serversListView.classList.remove('hidden');
   loadServersList();
 }
@@ -1745,11 +1851,13 @@ function renderServerDetail() {
   if (!activeServerDetail) return;
   const d = activeServerDetail;
   serverDetailNameEl.textContent = d.name;
+  serverDetailIcon.replaceChildren(profileAvatars.imageForId(d.iconId || 'robot', 'community-detail-icon-art'));
   setServerDetailStatus('');
 
   const isOwner = d.role === 'owner';
   const isMod = d.role === 'moderator';
   const myUsername = getSession().username.toLowerCase();
+  serverMembersCountEl.textContent = String(d.members.length);
 
   serverInviteSection.classList.toggle('hidden', !isOwner);
   if (isOwner) serverInviteCodeEl.textContent = d.inviteCode;
@@ -1757,13 +1865,94 @@ function renderServerDetail() {
   createChannelSection.classList.toggle('hidden', !isOwner && !isMod);
   leaveServerBtn.classList.toggle('hidden', isOwner);
   deleteServerBtn.classList.toggle('hidden', !isOwner);
+  serverManagementSection.classList.toggle('hidden', !isOwner);
+  serverModerationSection.classList.toggle('hidden', !isOwner && !isMod);
+  if (isOwner) {
+    serverRenameInput.value = d.name;
+    serverIconSelect.replaceChildren();
+    for (const avatar of window.AVATAR_CATALOG) {
+      if (avatar.id === 'phoenix' && myUsername !== 'necr0n') continue;
+      const option = document.createElement('option');
+      option.value = avatar.id;
+      option.textContent = avatar.label;
+      option.selected = avatar.id === (d.iconId || 'robot');
+      serverIconSelect.appendChild(option);
+    }
+    serverTransferSelect.replaceChildren();
+    for (const member of d.members.filter((member) => member.role !== 'owner')) {
+      const option = document.createElement('option');
+      option.value = member.username;
+      option.textContent = `${member.username} · ${serverRoleLabel(member.role)}`;
+      serverTransferSelect.appendChild(option);
+    }
+    transferServerBtn.disabled = serverTransferSelect.options.length === 0;
+    transferServerBtn.closest('.community-transfer-row').classList.toggle('hidden', serverTransferSelect.options.length === 0);
+  }
 
-  serverChannelsList.innerHTML = '';
-  for (const c of d.channels) {
+  serverTextChannelsList.innerHTML = '';
+  serverVoiceChannelsList.innerHTML = '';
+  const textChannels = d.channels.filter((c) => c.type === 'text');
+  const voiceChannels = d.channels.filter((c) => c.type !== 'text');
+  serverTextChannelsEmpty.classList.toggle('hidden', textChannels.length > 0);
+  serverVoiceChannelsEmpty.classList.toggle('hidden', voiceChannels.length > 0);
+
+  for (const c of textChannels) {
     const li = document.createElement('li');
-    li.className = 'friend-row';
+    li.className = 'server-channel-row server-channel-row--text';
+    li.dataset.channelId = String(c.id);
+    li.tabIndex = 0;
+    li.setAttribute('role', 'button');
+    li.setAttribute('aria-label', `# ${c.name} kanalını aç`);
     const main = document.createElement('div');
-    main.className = 'dm-row-main';
+    main.className = 'server-channel-copy';
+    const name = document.createElement('span');
+    name.className = 'name';
+    name.textContent = c.name;
+    main.append(name);
+    li.append(main);
+
+    if (c.unreadCount > 0) {
+      const unread = document.createElement('span');
+      unread.className = 'server-channel-unread-badge';
+      unread.textContent = c.unreadCount > 99 ? '99+' : String(c.unreadCount);
+      li.classList.add('has-unread');
+      li.append(unread);
+    }
+
+    const openIt = () => openTextChannel(d.id, c.id, c.name);
+    li.addEventListener('click', openIt);
+    li.addEventListener('keydown', (event) => {
+      if (event.key === 'Enter' || event.key === ' ') {
+        event.preventDefault();
+        openIt();
+      }
+    });
+
+    if (isOwner || isMod) {
+      const delBtn = document.createElement('button');
+      delBtn.className = 'btn btn-ghost';
+      delBtn.textContent = '[ SİL ]';
+      delBtn.onclick = (event) => {
+        event.stopPropagation();
+        deleteServerChannel(d.id, c.id);
+      };
+      li.append(delBtn);
+      appendChannelManagementActions(li, c, d.channels);
+    }
+
+    serverTextChannelsList.appendChild(li);
+  }
+
+  for (const c of voiceChannels) {
+    const li = document.createElement('li');
+    li.className = 'server-channel-row server-channel-row--voice';
+    li.dataset.channelId = String(c.id);
+    const icon = document.createElement('span');
+    icon.className = 'server-channel-icon';
+    icon.textContent = '◖◗';
+    icon.setAttribute('aria-hidden', 'true');
+    const main = document.createElement('div');
+    main.className = 'server-channel-copy';
     const name = document.createElement('span');
     name.className = 'name';
     name.textContent = c.name;
@@ -1771,7 +1960,7 @@ function renderServerDetail() {
     preview.className = 'preview';
     preview.textContent = `${c.memberCount} kişi`;
     main.append(name, preview);
-    li.append(main);
+    li.append(icon, main);
 
     const joinChBtn = document.createElement('button');
     joinChBtn.className = 'btn';
@@ -1785,16 +1974,19 @@ function renderServerDetail() {
       delBtn.textContent = '[ SİL ]';
       delBtn.onclick = () => deleteServerChannel(d.id, c.id);
       li.append(delBtn);
+      appendChannelManagementActions(li, c, d.channels);
     }
 
-    serverChannelsList.appendChild(li);
+    serverVoiceChannelsList.appendChild(li);
   }
 
   serverMembersList.innerHTML = '';
   for (const m of d.members) {
     profileAvatars.remember(m.username, m.avatarId);
     const li = document.createElement('li');
-    li.className = 'friend-row';
+    li.className = 'server-member-row';
+    li.dataset.username = m.username.toLowerCase();
+    li.classList.toggle('offline', !m.online);
     const main = document.createElement('div');
     main.className = 'dm-row-main';
     const name = document.createElement('span');
@@ -1804,14 +1996,19 @@ function renderServerDetail() {
     preview.className = 'preview';
     preview.textContent = serverRoleLabel(m.role);
     main.append(name, preview);
-    li.append(profileAvatars.image(m.username), main);
+    const presence = document.createElement('span');
+    presence.className = `server-member-presence${m.online ? ' online' : ''}`;
+    presence.title = m.online ? 'Çevrimiçi' : 'Çevrimdışı';
+    const actions = document.createElement('div');
+    actions.className = 'server-member-actions';
+    li.append(profileAvatars.image(m.username), presence, main, actions);
 
     if (isOwner && m.role !== 'owner') {
       const roleBtn = document.createElement('button');
       roleBtn.className = 'btn btn-ghost';
       roleBtn.textContent = m.role === 'moderator' ? '[ ÜYE YAP ]' : '[ MODERATÖR YAP ]';
       roleBtn.onclick = () => setServerMemberRole(d.id, m.username, m.role === 'moderator' ? 'member' : 'moderator');
-      li.append(roleBtn);
+      actions.append(roleBtn);
     }
 
     const canRemove = m.role !== 'owner' && (isOwner || (isMod && m.role === 'member')) && m.username.toLowerCase() !== myUsername;
@@ -1820,18 +2017,89 @@ function renderServerDetail() {
       removeBtn.className = 'btn btn-ghost';
       removeBtn.textContent = '[ ÇIKAR ]';
       removeBtn.onclick = () => removeServerMember(d.id, m.username);
-      li.append(removeBtn);
+      actions.append(removeBtn);
+
+      const banBtn = document.createElement('button');
+      banBtn.className = 'btn btn-ghost';
+      banBtn.textContent = '[ YASAKLA ]';
+      banBtn.onclick = () => banServerMember(d.id, m.username);
+      actions.append(banBtn);
+    }
+
+    if (m.username.toLowerCase() !== myUsername) {
+      const blockBtn = document.createElement('button');
+      blockBtn.className = 'btn btn-ghost';
+      blockBtn.textContent = '[ ENGELLE ]';
+      blockBtn.onclick = () => blockUser(m.username);
+      const reportBtn = document.createElement('button');
+      reportBtn.className = 'btn btn-ghost';
+      reportBtn.textContent = '[ ŞİKÂYET ]';
+      reportBtn.onclick = () => reportUser(m.username, d.id);
+      actions.append(blockBtn, reportBtn);
     }
 
     serverMembersList.appendChild(li);
   }
 }
 
+function appendChannelManagementActions(row, channel, channels) {
+  const actions = document.createElement('span');
+  actions.className = 'channel-management-actions';
+  const renameBtn = document.createElement('button');
+  renameBtn.className = 'btn btn-ghost';
+  renameBtn.textContent = '[ AD ]';
+  renameBtn.onclick = (event) => {
+    event.stopPropagation();
+    renameServerChannel(channel.id, channel.name);
+  };
+  const index = channels.findIndex((item) => item.id === channel.id);
+  const upBtn = document.createElement('button');
+  upBtn.className = 'btn btn-ghost';
+  upBtn.textContent = '[ ↑ ]';
+  upBtn.disabled = index <= 0;
+  upBtn.onclick = (event) => { event.stopPropagation(); moveServerChannel(channel.id, -1); };
+  const downBtn = document.createElement('button');
+  downBtn.className = 'btn btn-ghost';
+  downBtn.textContent = '[ ↓ ]';
+  downBtn.disabled = index < 0 || index >= channels.length - 1;
+  downBtn.onclick = (event) => { event.stopPropagation(); moveServerChannel(channel.id, 1); };
+  actions.append(renameBtn, upBtn, downBtn);
+  row.append(actions);
+}
+
+function updateCommunityMemberPresence({ serverId, username, online }) {
+  if (!activeServerDetail || activeServerDetail.id !== Number(serverId) || typeof username !== 'string') return;
+  const member = activeServerDetail.members.find((item) => item.username.toLowerCase() === username.toLowerCase());
+  if (member) member.online = !!online;
+  const row = [...serverMembersList.children].find((item) => item.dataset.username === username.toLowerCase());
+  if (!row) return;
+  row.classList.toggle('offline', !online);
+  const presence = row.querySelector('.server-member-presence');
+  if (presence) {
+    presence.classList.toggle('online', !!online);
+    presence.title = online ? 'Çevrimiçi' : 'Çevrimdışı';
+  }
+}
+
+function updateServerChannelCount({ serverId, channelId, memberCount }) {
+  if (!activeServerDetail || activeServerDetail.id !== Number(serverId)) return;
+  const channel = activeServerDetail.channels.find((item) => item.id === Number(channelId));
+  if (channel) channel.memberCount = Number(memberCount) || 0;
+  const row = serverVoiceChannelsList.querySelector(`[data-channel-id="${Number(channelId)}"]`);
+  if (!row) return;
+  const preview = row.querySelector('.preview');
+  if (preview) preview.textContent = `${Number(memberCount) || 0} kişi`;
+  row.classList.remove('count-updated');
+  requestAnimationFrame(() => row.classList.add('count-updated'));
+  setTimeout(() => row.classList.remove('count-updated'), 500);
+}
+
 async function createServerChannel() {
   const name = createChannelNameInput.value.trim();
   if (!name || !activeServerDetail) return;
+  const type = createChannelTypeSelect.value === 'voice' ? 'voice' : 'text';
   try {
-    await apiRequest(`/api/servers/${activeServerDetail.id}/channels`, { name });
+    await apiRequest(`/api/servers/${activeServerDetail.id}/channels`, { name, type });
     createChannelNameInput.value = '';
     // Sunucu, olusturulan kanali kanal olayi uzerinden (server-channel-created)
     // olusturana dahil tum uyelere yayinlar; listeyi burada elle guncellemiyoruz.
@@ -1845,6 +2113,178 @@ async function deleteServerChannel(serverId, channelId) {
     await apiDelete(`/api/servers/${serverId}/channels/${channelId}`);
   } catch (err) {
     setServerDetailStatus(err.message, 'error');
+  }
+}
+
+async function renameServerChannel(channelId, currentName) {
+  if (!activeServerDetail) return;
+  const name = prompt('Yeni kanal adı:', currentName);
+  if (name === null || name.trim() === currentName) return;
+  try {
+    await apiRequest(`/api/servers/${activeServerDetail.id}/channels/${channelId}/rename`, { name: name.trim() });
+  } catch (err) {
+    setServerDetailStatus(err.message, 'error');
+  }
+}
+
+async function moveServerChannel(channelId, direction) {
+  if (!activeServerDetail) return;
+  const ids = activeServerDetail.channels.map((channel) => channel.id);
+  const index = ids.indexOf(channelId);
+  const next = index + direction;
+  if (index < 0 || next < 0 || next >= ids.length) return;
+  [ids[index], ids[next]] = [ids[next], ids[index]];
+  try {
+    await apiRequest(`/api/servers/${activeServerDetail.id}/channels/reorder`, { channelIds: ids });
+  } catch (err) {
+    setServerDetailStatus(err.message, 'error');
+  }
+}
+
+async function saveServerSettings() {
+  if (!activeServerDetail) return;
+  try {
+    await apiRequest(`/api/servers/${activeServerDetail.id}/settings`, {
+      name: serverRenameInput.value.trim(),
+      iconId: serverIconSelect.value,
+    });
+    showToast('topluluk ayarları kaydedildi', 'ok', 2500);
+  } catch (err) {
+    setServerDetailStatus(err.message, 'error');
+  }
+}
+
+async function transferServerOwnership() {
+  if (!activeServerDetail || !serverTransferSelect.value) return;
+  const username = serverTransferSelect.value;
+  if (!confirm(`Topluluk sahipliğini ${username} kullanıcısına devretmek istediğine emin misin?`)) return;
+  try {
+    await apiRequest(`/api/servers/${activeServerDetail.id}/transfer`, { username });
+    showToast('topluluk sahipliği devredildi', 'ok', 3000);
+    await openServerDetail(activeServerDetail.id);
+  } catch (err) {
+    setServerDetailStatus(err.message, 'error');
+  }
+}
+
+async function banServerMember(serverId, username) {
+  const reason = prompt(`${username} için yasaklama nedeni (isteğe bağlı):`, '');
+  if (reason === null) return;
+  if (!confirm(`${username} topluluktan çıkarılacak ve yeniden katılamayacak. Devam edilsin mi?`)) return;
+  try {
+    await apiRequest(`/api/servers/${serverId}/members/${encodeURIComponent(username)}/ban`, { reason });
+    await openServerDetail(serverId);
+  } catch (err) {
+    setServerDetailStatus(err.message, 'error');
+  }
+}
+
+async function loadServerBans() {
+  if (!activeServerDetail) return;
+  const { token } = getSession();
+  try {
+    const res = await fetch(`${getServerUrl()}/api/servers/${activeServerDetail.id}/bans`, { headers: { Authorization: `Bearer ${token}` } });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'yasaklılar alınamadı');
+    serverManagementList.replaceChildren();
+    if (data.bans.length === 0) {
+      const item = document.createElement('li');
+      item.textContent = 'Yasaklanmış kullanıcı yok.';
+      serverManagementList.appendChild(item);
+      return;
+    }
+    for (const ban of data.bans) {
+      const item = document.createElement('li');
+      const text = document.createElement('span');
+      text.textContent = `${ban.username} · ${ban.reason || 'neden belirtilmedi'} · ${ban.bannedBy}`;
+      const button = document.createElement('button');
+      button.className = 'btn btn-ghost';
+      button.textContent = '[ YASAĞI KALDIR ]';
+      button.onclick = async () => {
+        await apiDelete(`/api/servers/${activeServerDetail.id}/bans/${encodeURIComponent(ban.username)}`);
+        loadServerBans();
+      };
+      item.append(text, button);
+      serverManagementList.appendChild(item);
+    }
+  } catch (err) {
+    setServerDetailStatus(err.message, 'error');
+  }
+}
+
+async function loadServerAuditLog() {
+  if (!activeServerDetail) return;
+  const { token } = getSession();
+  try {
+    const res = await fetch(`${getServerUrl()}/api/servers/${activeServerDetail.id}/audit-log`, { headers: { Authorization: `Bearer ${token}` } });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'yönetim günlüğü alınamadı');
+    serverManagementList.replaceChildren();
+    for (const entry of data.entries) {
+      const item = document.createElement('li');
+      const time = new Date(entry.created_at).toLocaleString('tr-TR');
+      item.textContent = `${time} · ${entry.actor} · ${entry.action}${entry.target ? ` · ${entry.target}` : ''}`;
+      serverManagementList.appendChild(item);
+    }
+    if (!data.entries.length) {
+      const item = document.createElement('li');
+      item.textContent = 'Henüz yönetim kaydı yok.';
+      serverManagementList.appendChild(item);
+    }
+  } catch (err) {
+    setServerDetailStatus(err.message, 'error');
+  }
+}
+
+async function blockUser(username) {
+  if (!confirm(`${username} engellensin mi? Arkadaşlığınız varsa kaldırılacak.`)) return;
+  try {
+    await apiRequest(`/api/blocks/${encodeURIComponent(username)}`, {});
+    showToast(`${username} engellendi`, 'ok', 2500);
+    loadFriends();
+    loadBlockedUsers();
+  } catch (err) {
+    showToast(err.message, 'error');
+  }
+}
+
+async function reportUser(username, serverId = null) {
+  const reason = prompt(`${username} kullanıcısını neden şikâyet ediyorsun?`, '');
+  if (reason === null || !reason.trim()) return;
+  try {
+    await apiRequest('/api/reports', { username, serverId, reason: reason.trim() });
+    showToast('şikâyet yöneticiye gönderildi', 'ok', 2500);
+  } catch (err) {
+    showToast(err.message, 'error');
+  }
+}
+
+async function loadBlockedUsers() {
+  const { token } = getSession();
+  try {
+    const res = await fetch(`${getServerUrl()}/api/blocks`, { headers: { Authorization: `Bearer ${token}` } });
+    const data = await res.json();
+    if (!res.ok) return;
+    blockedUsersList.replaceChildren();
+    blockedUsersEmpty.classList.toggle('hidden', data.users.length > 0);
+    for (const user of data.users) {
+      const item = document.createElement('li');
+      item.className = 'friend-row';
+      const name = document.createElement('span');
+      name.className = 'name';
+      name.textContent = user.username;
+      const button = document.createElement('button');
+      button.className = 'btn btn-ghost';
+      button.textContent = '[ ENGELİ KALDIR ]';
+      button.onclick = async () => {
+        await apiDelete(`/api/blocks/${encodeURIComponent(user.username)}`);
+        loadBlockedUsers();
+      };
+      item.append(profileAvatars.image(user.username, user.avatarId), name, button);
+      blockedUsersList.appendChild(item);
+    }
+  } catch {
+    // Ayarlar ekraninin geri kalanini engelleme.
   }
 }
 
@@ -1888,7 +2328,7 @@ async function leaveServer() {
   if (!activeServerDetail) return;
   try {
     await apiRequest(`/api/servers/${activeServerDetail.id}/leave`, {});
-    showToast('sunucudan ayrıldın', 'ok', 2500);
+    showToast('topluluktan ayrıldın', 'ok', 2500);
     closeServerDetail();
   } catch (err) {
     setServerDetailStatus(err.message, 'error');
@@ -1897,10 +2337,10 @@ async function leaveServer() {
 
 async function deleteServer() {
   if (!activeServerDetail) return;
-  if (!confirm(`"${activeServerDetail.name}" sunucusunu kalıcı olarak silmek istediğine emin misin? Bu işlem geri alınamaz.`)) return;
+  if (!confirm(`"${activeServerDetail.name}" topluluğunu kalıcı olarak silmek istediğine emin misin? Bu işlem geri alınamaz.`)) return;
   try {
     await apiDelete(`/api/servers/${activeServerDetail.id}`);
-    showToast('sunucu silindi', 'ok', 3000);
+    showToast('topluluk silindi', 'ok', 3000);
     closeServerDetail();
   } catch (err) {
     setServerDetailStatus(err.message, 'error');
@@ -1970,6 +2410,324 @@ async function performJoinServerVoiceChannel(serverId, channelId, channelName) {
   }
 
   joining = false;
+}
+
+// ---- topluluk metin kanallari ----
+// Ses kanallarinin aksine bir Socket.IO odasina katilim gerekmez: mesajlar
+// toplulugun tum cevrimici uyelerine yayinlanir (server-channel-created vb.
+// olaylarla ayni desen), istemci mesaji acik kanaldaysa sohbete ekler,
+// degilse yalnizca rozeti/bildirim durumunu gunceller.
+
+let latestServersList = [];
+
+function showServerChannelsView() {
+  serverChannelsView.classList.remove('hidden');
+  serverTextChannelView.classList.add('hidden');
+}
+
+function closeTextChannel() {
+  currentTextChannel = null;
+  textChannelMessages = [];
+  seenServerMessageIds.clear();
+  textChannelAutoScroll = true;
+  textChannelHasMoreHistory = true;
+  showServerChannelsView();
+}
+
+function bumpServerUnreadLocally(serverId, delta) {
+  const entry = latestServersList.find((s) => s.id === serverId);
+  if (!entry) return;
+  entry.unreadCount = Math.max(0, (entry.unreadCount || 0) + delta);
+  renderServersList(latestServersList);
+}
+
+function bumpChannelUnreadLocally(serverId, channelId) {
+  bumpServerUnreadLocally(serverId, 1);
+  if (activeServerDetail && activeServerDetail.id === serverId) {
+    const channel = activeServerDetail.channels.find((c) => c.id === channelId);
+    if (channel) channel.unreadCount = (channel.unreadCount || 0) + 1;
+    renderServerDetail();
+  }
+}
+
+async function markTextChannelRead() {
+  if (!currentTextChannel) return;
+  const { serverId, channelId } = currentTextChannel;
+  const channel = activeServerDetail?.id === serverId ? activeServerDetail.channels.find((c) => c.id === channelId) : null;
+  const hadUnread = channel ? channel.unreadCount || 0 : 0;
+  if (channel) {
+    channel.unreadCount = 0;
+    renderServerDetail();
+  }
+  if (hadUnread > 0) bumpServerUnreadLocally(serverId, -hadUnread);
+
+  try {
+    await fetch(`${getServerUrl()}/api/servers/${serverId}/channels/${channelId}/read`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${getSession().token}` },
+    });
+  } catch {
+    // sessizce yoksay; bir sonraki acilista sunucu tarafi zaten guncel kalir
+  }
+}
+
+// Gelen/gecmis mesajlari clientMessageId/id bazli tekillestirerek listeye
+// ekler ve zaman damgasina gore sirali tutar; var olan mesajlari (ornegin
+// aninda gelen bir soket mesaji) gecmis yuklemesiyle asla ezmez.
+function ingestTextChannelMessages(messages, { prepend = false } = {}) {
+  const additions = [];
+  const myUsername = getSession().username;
+  for (const m of messages) {
+    if (seenServerMessageIds.has(m.id)) continue;
+    seenServerMessageIds.add(m.id);
+    additions.push({ ...m, own: m.from === myUsername });
+  }
+  if (additions.length === 0) return additions;
+  textChannelMessages = prepend ? [...additions, ...textChannelMessages] : [...textChannelMessages, ...additions];
+  textChannelMessages.sort((a, b) => a.ts - b.ts);
+  return additions;
+}
+
+async function loadTextChannelMessages({ older = false } = {}) {
+  if (!currentTextChannel) return false;
+  const { serverId, channelId } = currentTextChannel;
+  const { token } = getSession();
+  let url = `${getServerUrl()}/api/servers/${serverId}/channels/${channelId}/messages`;
+  if (older && textChannelMessages.length > 0) {
+    url += `?before=${textChannelMessages[0].ts}`;
+  }
+  try {
+    const res = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'mesajlar alınamadı');
+    if (!currentTextChannel || currentTextChannel.channelId !== channelId) return false;
+    const incoming = data.messages || [];
+    if (older && incoming.length < 50) textChannelHasMoreHistory = false;
+    ingestTextChannelMessages(incoming, { prepend: older });
+    renderTextChannelLog({ preserveScroll: older });
+    return true;
+  } catch (err) {
+    if (older) {
+      showToast(err.message || 'eski mesajlar alınamadı', 'error');
+    } else {
+      textChannelLoadState.className = 'community-detail-state error';
+      textChannelLoadMessage.textContent = err.message || 'Mesajlar yüklenemedi.';
+      textChannelRetryBtn.classList.remove('hidden');
+    }
+    return false;
+  }
+}
+
+async function openTextChannel(serverId, channelId, channelName) {
+  currentTextChannel = { serverId, channelId, name: channelName };
+  textChannelMessages = [];
+  seenServerMessageIds.clear();
+  textChannelAutoScroll = true;
+  textChannelHasMoreHistory = true;
+  textChannelNameEl.textContent = channelName;
+  serverChannelsView.classList.add('hidden');
+  serverTextChannelView.classList.remove('hidden');
+  renderTextChannelLog();
+
+  textChannelLoadState.className = 'community-detail-state';
+  textChannelLoadMessage.textContent = 'Mesajlar yükleniyor...';
+  textChannelRetryBtn.classList.add('hidden');
+  textChannelLoadState.classList.remove('hidden');
+  textChannelLogEl.classList.add('hidden');
+  textChannelEmptyEl.classList.add('hidden');
+
+  const ok = await loadTextChannelMessages();
+  if (!currentTextChannel || currentTextChannel.channelId !== channelId) return;
+  if (ok) {
+    textChannelLoadState.classList.add('hidden');
+    textChannelLogEl.classList.remove('hidden');
+    markTextChannelRead();
+  }
+}
+
+async function openServerAndTextChannel(serverId, channelId) {
+  if (!activeServerDetail || activeServerDetail.id !== serverId) {
+    await openServerDetail(serverId);
+  }
+  const channel = activeServerDetail?.id === serverId ? activeServerDetail.channels.find((c) => c.id === channelId) : null;
+  if (channel && channel.type === 'text') openTextChannel(serverId, channelId, channel.name);
+}
+
+function canDeleteTextMessage(m) {
+  if (m.own) return true;
+  if (!activeServerDetail || !currentTextChannel || activeServerDetail.id !== currentTextChannel.serverId) return false;
+  return activeServerDetail.role === 'owner' || activeServerDetail.role === 'moderator';
+}
+
+function scrollTextChannelToBottom() {
+  textChannelLogEl.scrollTop = textChannelLogEl.scrollHeight;
+  textChannelScrollBtn.classList.add('hidden');
+}
+
+function renderTextChannelLog({ preserveScroll = false } = {}) {
+  const prevHeight = textChannelLogEl.scrollHeight;
+  const prevScrollTop = textChannelLogEl.scrollTop;
+
+  textChannelLogEl.innerHTML = '';
+  textChannelEmptyEl.classList.toggle('hidden', textChannelMessages.length > 0);
+
+  for (const m of textChannelMessages) {
+    const div = document.createElement('div');
+    div.className = `chat-message ${m.own ? 'own' : ''} ${m.pending ? 'pending' : ''} ${m.failed ? 'failed' : ''}`.trim();
+    div.dataset.messageId = m.id;
+
+    const meta = document.createElement('div');
+    meta.className = 'meta';
+    let metaText = `${m.from} · ${formatChatTime(m.ts)}`;
+    if (m.pending) metaText += ' · gönderiliyor...';
+    if (m.failed) metaText += ' · başarısız';
+    meta.textContent = metaText;
+    meta.prepend(profileAvatars.image(m.from, m.avatarId));
+
+    const text = document.createElement('div');
+    text.className = 'text';
+    text.textContent = m.text;
+
+    div.append(meta, text);
+
+    if (m.failed) {
+      const retryBtn = document.createElement('button');
+      retryBtn.className = 'btn btn-ghost retry-btn';
+      retryBtn.textContent = '[ TEKRAR DENE ]';
+      retryBtn.onclick = () => {
+        m.pending = true;
+        m.failed = false;
+        renderTextChannelLog();
+        sendTextChannelMessageWithRetry(m);
+      };
+      div.appendChild(retryBtn);
+    } else if (!m.pending && canDeleteTextMessage(m)) {
+      const delBtn = document.createElement('button');
+      delBtn.className = 'btn btn-ghost retry-btn';
+      delBtn.textContent = '[ SİL ]';
+      delBtn.onclick = () => deleteTextChannelMessage(m.id);
+      div.appendChild(delBtn);
+    }
+
+    textChannelLogEl.appendChild(div);
+  }
+
+  if (preserveScroll) {
+    textChannelLogEl.scrollTop = textChannelLogEl.scrollHeight - prevHeight + prevScrollTop;
+  } else if (textChannelAutoScroll) {
+    scrollTextChannelToBottom();
+  } else {
+    textChannelScrollBtn.classList.toggle('hidden', textChannelMessages.length === 0);
+  }
+}
+
+function autoResizeTextChannelInput() {
+  textChannelInput.style.height = 'auto';
+  textChannelInput.style.height = `${Math.min(textChannelInput.scrollHeight, 90)}px`;
+}
+
+function sendTextChannelMessageWithRetry(localMsg) {
+  if (!socket || !socket.connected || !currentTextChannel) {
+    localMsg.pending = false;
+    localMsg.failed = true;
+    renderTextChannelLog();
+    return;
+  }
+  socket.emit(
+    'send-server-message',
+    { channelId: currentTextChannel.channelId, text: localMsg.text, clientMessageId: localMsg.clientMessageId },
+    (ack) => {
+      const idx = textChannelMessages.findIndex((m) => m.clientMessageId === localMsg.clientMessageId);
+      if (idx === -1) return;
+      if (ack && ack.ok && ack.message) {
+        seenServerMessageIds.add(ack.message.id);
+        textChannelMessages[idx] = { ...ack.message, own: true, clientMessageId: localMsg.clientMessageId };
+      } else {
+        textChannelMessages[idx].pending = false;
+        textChannelMessages[idx].failed = true;
+        if (ack && ack.error) showToast(ack.error, 'error');
+      }
+      renderTextChannelLog();
+    }
+  );
+}
+
+function sendTextChannelMessage() {
+  const text = textChannelInput.value;
+  if (!text.trim() || !currentTextChannel) return;
+  if (text.length > 2000) {
+    showToast('mesaj çok uzun (en fazla 2000 karakter)', 'error');
+    return;
+  }
+  if (!socket || !socket.connected) {
+    showToast('bağlantı yok, mesaj gönderilemedi', 'error');
+    return;
+  }
+
+  const clientMessageId =
+    typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random()}`;
+  const localMsg = {
+    id: clientMessageId,
+    clientMessageId,
+    from: getSession().username,
+    text,
+    ts: Date.now(),
+    own: true,
+    pending: true,
+  };
+  textChannelMessages.push(localMsg);
+  textChannelAutoScroll = true;
+  renderTextChannelLog();
+
+  textChannelInput.value = '';
+  autoResizeTextChannelInput();
+
+  sendTextChannelMessageWithRetry(localMsg);
+}
+
+async function deleteTextChannelMessage(messageId) {
+  const ack = await emitWithTimeout('delete-server-message', { messageId });
+  if (!ack || ack.error) {
+    showToast(ack?.error || 'mesaj silinemedi', 'error');
+    return;
+  }
+  textChannelMessages = textChannelMessages.filter((m) => m.id !== messageId);
+  renderTextChannelLog();
+}
+
+// Acik olmayan bir kanala mesaj gelince rozetleri gunceller ve (kanal
+// ekranindayken degilse) mevcut bildirim ayarlarina uyarak sistem bildirimi
+// gosterir; kullanici zaten o kanali izliyorsa gereksiz bildirim gosterilmez.
+function handleIncomingServerTextMessage(message) {
+  const isOpenChannel = currentTextChannel && currentTextChannel.channelId === message.channelId;
+  if (isOpenChannel) {
+    const wasNearBottom = textChannelLogEl.scrollTop + textChannelLogEl.clientHeight >= textChannelLogEl.scrollHeight - 40;
+    const added = ingestTextChannelMessages([message]);
+    if (added.length > 0) {
+      textChannelAutoScroll = textChannelAutoScroll || wasNearBottom;
+      renderTextChannelLog();
+      markTextChannelRead();
+    }
+    return;
+  }
+
+  bumpChannelUnreadLocally(message.serverId, message.channelId);
+
+  if (message.from === getSession().username) return;
+  const settings = getSettings();
+  if (window.api && settings.notifyChatMessage) {
+    const channelName =
+      (activeServerDetail?.id === message.serverId && activeServerDetail.channels.find((c) => c.id === message.channelId)?.name) ||
+      'kanal';
+    window.api.notifyCommunityMessage({
+      serverId: message.serverId,
+      channelId: message.channelId,
+      channelName,
+      fromUsername: message.from,
+      text: message.text,
+      showContent: settings.notifyChatContent,
+    });
+  }
 }
 
 // ---- oda / gorusme yasam donguesu ----
@@ -2306,16 +3064,64 @@ function connectSocket() {
       activeServerDetail.channels = activeServerDetail.channels.filter((c) => c.id !== channelId);
       renderServerDetail();
     }
+    if (currentTextChannel && currentTextChannel.channelId === channelId) {
+      closeTextChannel();
+      showToast('bu kanal silindi', 'info', 3000);
+    }
   });
 
+  socket.on('server-text-message', handleIncomingServerTextMessage);
+
+  socket.on('server-message-deleted', ({ channelId, messageId }) => {
+    if (currentTextChannel && currentTextChannel.channelId === channelId) {
+      textChannelMessages = textChannelMessages.filter((m) => m.id !== messageId);
+      renderTextChannelLog();
+    }
+  });
+
+  socket.on('server-member-presence', updateCommunityMemberPresence);
+  socket.on('server-channel-count', updateServerChannelCount);
+  socket.on('server-updated', ({ serverId, name, iconId }) => {
+    if (activeServerDetail && activeServerDetail.id === Number(serverId)) {
+      activeServerDetail.name = name;
+      activeServerDetail.iconId = iconId;
+      renderServerDetail();
+    }
+    loadServersList();
+  });
+  socket.on('server-channel-updated', ({ serverId, channelId, name }) => {
+    if (!activeServerDetail || activeServerDetail.id !== Number(serverId)) return;
+    const channel = activeServerDetail.channels.find((item) => item.id === Number(channelId));
+    if (channel) channel.name = name;
+    if (currentTextChannel?.channelId === Number(channelId)) {
+      currentTextChannel.name = name;
+      textChannelNameEl.textContent = `# ${name}`;
+    }
+    renderServerDetail();
+  });
+  socket.on('server-channels-reordered', ({ serverId, channelIds }) => {
+    if (!activeServerDetail || activeServerDetail.id !== Number(serverId)) return;
+    const positions = new Map(channelIds.map((id, index) => [Number(id), index]));
+    activeServerDetail.channels.sort((a, b) => positions.get(a.id) - positions.get(b.id));
+    renderServerDetail();
+  });
+  socket.on('server-members-updated', ({ serverId }) => {
+    if (activeServerDetail && activeServerDetail.id === Number(serverId)) openServerDetail(serverId);
+  });
+  socket.on('server-owner-transferred', ({ serverId }) => {
+    if (activeServerDetail && activeServerDetail.id === Number(serverId)) openServerDetail(serverId);
+    loadServersList();
+  });
+  socket.on('friend-removed', () => loadFriends());
+
   socket.on('server-role-changed', ({ serverId, role }) => {
-    showToast(`bir sunucudaki rolün değişti: ${serverRoleLabel(role)}`, 'info', 4000);
+    showToast(`bir topluluktaki rolün değişti: ${serverRoleLabel(role)}`, 'info', 4000);
     if (currentChannelServerId === serverId) currentServerChannelRole = role;
     if (activeServerDetail && activeServerDetail.id === serverId) openServerDetail(serverId);
   });
 
   socket.on('server-removed', ({ serverId }) => {
-    showToast('bir sunucudan çıkarıldın', 'error', 4000);
+    showToast('bir topluluktan çıkarıldın', 'error', 4000);
     if (activeServerDetail && activeServerDetail.id === serverId) closeServerDetail();
     else loadServersList();
   });
@@ -2465,15 +3271,56 @@ async function loadAdminUsers() {
   const { token } = getSession();
   adminStatusEl.textContent = '';
   try {
-    const res = await fetch(`${getServerUrl()}/api/admin/users`, {
-      headers: { Authorization: `Bearer ${token}` },
-    });
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.error || 'kullanıcılar alınamadı');
+    const [usersRes, reportsRes] = await Promise.all([
+      fetch(`${getServerUrl()}/api/admin/users`, { headers: { Authorization: `Bearer ${token}` } }),
+      fetch(`${getServerUrl()}/api/admin/reports`, { headers: { Authorization: `Bearer ${token}` } }),
+    ]);
+    const data = await usersRes.json();
+    if (!usersRes.ok) throw new Error(data.error || 'kullanıcılar alınamadı');
     renderAdminUsers(data.users);
+    if (reportsRes.ok) renderAdminReports((await reportsRes.json()).reports);
   } catch (err) {
     adminStatusEl.textContent = `[ERROR] ${err.message}`;
     adminStatusEl.className = 'status-line error';
+  }
+}
+
+function renderAdminReports(reports) {
+  adminReportsList.replaceChildren();
+  for (const report of reports) {
+    const item = document.createElement('li');
+    item.className = 'friend-row';
+    const text = document.createElement('div');
+    text.className = 'dm-row-main';
+    const title = document.createElement('span');
+    title.className = 'name';
+    title.textContent = `${report.reporter} → ${report.reported}`;
+    const detail = document.createElement('span');
+    detail.className = 'preview';
+    detail.textContent = `${report.reason}${report.server_id ? ` · topluluk ${report.server_id}` : ''}`;
+    text.append(title, detail);
+    const resolveBtn = document.createElement('button');
+    resolveBtn.className = 'btn btn-ghost';
+    resolveBtn.textContent = '[ ÇÖZÜLDÜ ]';
+    resolveBtn.onclick = async () => {
+      resolveBtn.disabled = true;
+      try {
+        await apiRequest(`/api/admin/reports/${report.id}/resolve`, { method: 'POST' });
+        await loadAdminUsers();
+      } catch (err) {
+        adminStatusEl.textContent = `[ERROR] ${err.message}`;
+        adminStatusEl.className = 'status-line error';
+        resolveBtn.disabled = false;
+      }
+    };
+    item.append(text, resolveBtn);
+    adminReportsList.appendChild(item);
+  }
+  if (!reports.length) {
+    const item = document.createElement('li');
+    item.className = 'status-line';
+    item.textContent = 'açık şikâyet yok';
+    adminReportsList.appendChild(item);
   }
 }
 
@@ -2564,6 +3411,12 @@ if (window.api) {
     showScreen(joinScreen);
     showTab('dm');
     openDmThread(fromUsername);
+  });
+  window.api.onNotificationCommunityClicked(({ serverId, channelId } = {}) => {
+    if (!Number.isInteger(serverId) || !Number.isInteger(channelId)) return;
+    showScreen(joinScreen);
+    showTab('servers');
+    openServerAndTextChannel(serverId, channelId);
   });
   window.api.onGameDetected(({ game } = {}) => {
     myCurrentGame = game || null;
@@ -2657,14 +3510,57 @@ joinServerCodeInput.addEventListener('keydown', (e) => {
   if (e.key === 'Enter') joinServerBtn.click();
 });
 serverBackBtn.addEventListener('click', closeServerDetail);
+serversRetryBtn.addEventListener('click', loadServersList);
+serverDetailRetryBtn.addEventListener('click', () => {
+  const serverId = Number(serverDetailRetryBtn.dataset.serverId);
+  if (Number.isInteger(serverId) && serverId > 0) openServerDetail(serverId);
+});
 copyServerInviteBtn.addEventListener('click', copyServerInvite);
 regenServerInviteBtn.addEventListener('click', regenerateServerInvite);
 createChannelBtn.addEventListener('click', createServerChannel);
 createChannelNameInput.addEventListener('keydown', (e) => {
   if (e.key === 'Enter') createChannelBtn.click();
 });
+saveServerSettingsBtn.addEventListener('click', saveServerSettings);
+transferServerBtn.addEventListener('click', transferServerOwnership);
+loadServerBansBtn.addEventListener('click', loadServerBans);
+loadServerAuditBtn.addEventListener('click', loadServerAuditLog);
 leaveServerBtn.addEventListener('click', leaveServer);
 deleteServerBtn.addEventListener('click', deleteServer);
+
+textChannelBackBtn.addEventListener('click', closeTextChannel);
+
+textChannelRetryBtn.addEventListener('click', () => {
+  if (currentTextChannel) openTextChannel(currentTextChannel.serverId, currentTextChannel.channelId, currentTextChannel.name);
+});
+
+textChannelSendBtn.addEventListener('click', sendTextChannelMessage);
+
+textChannelInput.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter' && !e.shiftKey) {
+    e.preventDefault();
+    sendTextChannelMessage();
+  }
+});
+
+textChannelInput.addEventListener('input', autoResizeTextChannelInput);
+
+textChannelLogEl.addEventListener('scroll', () => {
+  const threshold = 40;
+  textChannelAutoScroll = textChannelLogEl.scrollTop + textChannelLogEl.clientHeight >= textChannelLogEl.scrollHeight - threshold;
+  if (textChannelAutoScroll) textChannelScrollBtn.classList.add('hidden');
+  if (textChannelLogEl.scrollTop < 40 && textChannelHasMoreHistory && !textChannelLoadingOlder && currentTextChannel) {
+    textChannelLoadingOlder = true;
+    loadTextChannelMessages({ older: true }).finally(() => {
+      textChannelLoadingOlder = false;
+    });
+  }
+});
+
+textChannelScrollBtn.addEventListener('click', () => {
+  textChannelAutoScroll = true;
+  scrollTextChannelToBottom();
+});
 
 tabBtns.forEach((btn) => btn.addEventListener('click', () => showTab(btn.dataset.tab)));
 

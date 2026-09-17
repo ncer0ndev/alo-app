@@ -59,6 +59,12 @@ function isValidServerOrChannelName(v) {
 function isValidInviteCode(v) {
   return typeof v === 'string' && /^[A-F0-9]{6,12}$/i.test(v);
 }
+function isValidCommunityIcon(v, username) {
+  return typeof v === 'string' && avatarCatalog.some((avatar) => avatar.id === v) && (v !== 'phoenix' || username.toLowerCase() === 'necr0n');
+}
+function isValidChannelType(v) {
+  return v === 'text' || v === 'voice';
+}
 function generateTempPassword() {
   // 0/O/1/I/l gibi karistirilabilir karakterler haric tutuldu; elle iletilecek.
   const chars = 'ABCDEFGHJKMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789';
@@ -117,6 +123,31 @@ async function notifyFriends(userId, event, payload) {
   for (const friend of await db.listFriends(userId)) {
     emitToUser(friend.username, event, payload);
   }
+}
+
+async function emitToServerMembers(serverId, event, payload) {
+  for (const member of await db.listServerMembers(serverId)) {
+    emitToUser(member.username, event, payload);
+  }
+}
+
+async function notifyCommunityPresence(userId, username, online) {
+  for (const community of await db.listServersForUser(userId)) {
+    await emitToServerMembers(community.id, 'server-member-presence', {
+      serverId: community.id,
+      username,
+      online,
+    });
+  }
+}
+
+function publishServerChannelCount(room) {
+  if (!room || room.type !== 'server-channel') return;
+  emitToServerMembers(room.serverId, 'server-channel-count', {
+    serverId: room.serverId,
+    channelId: room.channelId,
+    memberCount: room.members.size,
+  }).catch((err) => console.error('kanal kisi sayisi yayinlanamadi:', err.message));
 }
 
 function isUserBusy(usernameKey) {
@@ -199,6 +230,7 @@ function forceKickFromRoom(roomCode, targetSocketId) {
   const room = rooms.get(roomCode);
   if (!room || !room.members.has(targetSocketId)) return;
   room.members.delete(targetSocketId);
+  publishServerChannelCount(room);
   io.to(roomCode).emit('peer-left', { id: targetSocketId });
   const targetSocket = io.sockets.sockets.get(targetSocketId);
   if (targetSocket) {
@@ -510,6 +542,7 @@ app.post(
     }
     const target = await db.getUserByUsername(targetUsername);
     if (!target) return res.status(404).json({ error: 'kullanici bulunamadi' });
+    if (await db.isEitherUserBlocked(req.userId, target.id)) return res.status(403).json({ error: 'bu kullaniciyla etkilesim engellendi' });
     if (await db.areFriends(req.userId, target.id)) return res.status(409).json({ error: 'zaten arkadassiniz' });
 
     if (await db.hasPendingRequest(target.id, req.userId)) {
@@ -534,6 +567,7 @@ app.post(
     if (!isValidUsername(fromUsername)) return res.status(400).json({ error: 'gecersiz kullanici adi' });
     const from = await db.getUserByUsername(fromUsername);
     if (!from) return res.status(404).json({ error: 'kullanici bulunamadi' });
+    if (await db.isEitherUserBlocked(req.userId, from.id)) return res.status(403).json({ error: 'bu kullaniciyla etkilesim engellendi' });
 
     const ok = await db.acceptFriendRequest(from.id, req.userId);
     if (!ok) return res.status(400).json({ error: 'bekleyen istek bulunamadi' });
@@ -575,6 +609,66 @@ app.post(
     if (!isValidUsername(otherUsername)) return res.status(400).json({ error: 'gecersiz kullanici adi' });
     const other = await db.getUserByUsername(otherUsername);
     if (other) await db.removeFriend(req.userId, other.id);
+    res.json({ ok: true });
+  })
+);
+
+// ---- Engelleme ve sikayet ----
+
+app.get(
+  '/api/blocks',
+  requireAuth,
+  asyncRoute(async (req, res) => {
+    const rows = await db.listBlockedUsers(req.userId);
+    res.json({ users: rows.map((row) => ({ username: row.username, avatarId: publicAvatar(row), blockedAt: Number(row.created_at) })) });
+  })
+);
+
+app.post(
+  '/api/blocks/:username',
+  requireAuth,
+  friendLimiter,
+  asyncRoute(async (req, res) => {
+    const targetUsername = req.params.username;
+    if (!isValidUsername(targetUsername)) return res.status(400).json({ error: 'gecersiz kullanici adi' });
+    const target = await db.getUserByUsername(targetUsername);
+    if (!target) return res.status(404).json({ error: 'kullanici bulunamadi' });
+    if (target.id === req.userId) return res.status(400).json({ error: 'kendini engelleyemezsin' });
+    await db.blockUser(req.userId, target.id);
+    emitToUser(target.username, 'friend-removed', { username: req.username });
+    res.json({ ok: true });
+  })
+);
+
+app.delete(
+  '/api/blocks/:username',
+  requireAuth,
+  asyncRoute(async (req, res) => {
+    const target = await db.getUserByUsername(req.params.username);
+    if (target) await db.unblockUser(req.userId, target.id);
+    res.json({ ok: true });
+  })
+);
+
+app.post(
+  '/api/reports',
+  requireAuth,
+  friendLimiter,
+  asyncRoute(async (req, res) => {
+    const { username: targetUsername, serverId, reason } = req.body || {};
+    if (!isValidUsername(targetUsername)) return res.status(400).json({ error: 'gecersiz kullanici adi' });
+    const cleanReason = typeof reason === 'string' ? reason.trim() : '';
+    if (cleanReason.length < 3 || cleanReason.length > 500) return res.status(400).json({ error: 'sikayet nedeni 3-500 karakter olmali' });
+    const target = await db.getUserByUsername(targetUsername);
+    if (!target || target.id === req.userId) return res.status(400).json({ error: 'gecersiz hedef kullanici' });
+    let validServerId = null;
+    if (serverId !== undefined && serverId !== null) {
+      validServerId = Number(serverId);
+      if (!(await db.getServerMember(validServerId, req.userId)) || !(await db.getServerMember(validServerId, target.id))) {
+        return res.status(403).json({ error: 'bu topluluk icin sikayet olusturamazsin' });
+      }
+    }
+    await db.createUserReport(req.userId, target.id, validServerId, cleanReason);
     res.json({ ok: true });
   })
 );
@@ -667,6 +761,29 @@ app.get(
   })
 );
 
+app.get(
+  '/api/admin/reports',
+  requireAuth,
+  requireAdmin,
+  asyncRoute(async (_req, res) => {
+    const reports = await db.listOpenReports();
+    res.json({ reports: reports.map((row) => ({ ...row, created_at: Number(row.created_at) })) });
+  })
+);
+
+app.post(
+  '/api/admin/reports/:reportId/resolve',
+  requireAuth,
+  requireAdmin,
+  asyncRoute(async (req, res) => {
+    const reportId = Number(req.params.reportId);
+    if (!Number.isInteger(reportId) || reportId < 1) return res.status(400).json({ error: 'gecersiz sikayet' });
+    const resolved = await db.resolveUserReport(reportId);
+    if (!resolved) return res.status(404).json({ error: 'acik sikayet bulunamadi' });
+    res.json({ ok: true });
+  })
+);
+
 app.post(
   '/api/admin/users/:username/reset-password',
   requireAuth,
@@ -690,18 +807,18 @@ app.post(
 // her zaman sunucuda server_members tablosundan okunur, istemciye guvenilmez.
 
 function publicServerMember(row) {
-  return { username: row.username, avatarId: publicAvatar(row), role: row.role };
+  return { username: row.username, avatarId: publicAvatar(row), role: row.role, online: isUserOnline(row.username) };
 }
 
 async function requireServerMembership(req, res, serverId) {
   const server = await db.getServerById(serverId);
   if (!server) {
-    res.status(404).json({ error: 'sunucu bulunamadi' });
+    res.status(404).json({ error: 'topluluk bulunamadi' });
     return null;
   }
   const member = await db.getServerMember(serverId, req.userId);
   if (!member) {
-    res.status(403).json({ error: 'bu sunucunun uyesi degilsin' });
+    res.status(403).json({ error: 'bu toplulugun uyesi degilsin' });
     return null;
   }
   return { server, member };
@@ -713,10 +830,11 @@ app.post(
   friendLimiter,
   asyncRoute(async (req, res) => {
     const { name } = req.body || {};
-    if (!isValidServerOrChannelName(name)) return res.status(400).json({ error: 'gecersiz sunucu adi (2-40 karakter)' });
+    if (!isValidServerOrChannelName(name)) return res.status(400).json({ error: 'gecersiz topluluk adi (2-40 karakter)' });
     const serverId = await db.createServer(name.trim(), req.userId);
     const server = await db.getServerById(serverId);
-    res.json({ id: server.id, name: server.name, inviteCode: server.invite_code, role: 'owner' });
+    await db.addServerAuditLog(serverId, req.userId, 'community_created', server.name);
+    res.json({ id: server.id, name: server.name, iconId: server.icon_id, inviteCode: server.invite_code, role: 'owner' });
   })
 );
 
@@ -724,9 +842,16 @@ app.get(
   '/api/servers',
   requireAuth,
   asyncRoute(async (req, res) => {
-    const rows = await db.listServersForUser(req.userId);
+    const rows = await db.listServersForUserWithUnread(req.userId);
     res.json({
-      servers: rows.map((s) => ({ id: s.id, name: s.name, role: s.role, isOwner: s.owner_user_id === req.userId })),
+      servers: rows.map((s) => ({
+        id: s.id,
+        name: s.name,
+        iconId: s.icon_id,
+        role: s.role,
+        isOwner: s.owner_user_id === req.userId,
+        unreadCount: Number(s.unread_count) || 0,
+      })),
     });
   })
 );
@@ -740,10 +865,13 @@ app.post(
     if (!isValidInviteCode(inviteCode)) return res.status(400).json({ error: 'gecersiz davet kodu' });
     const server = await db.getServerByInviteCode(inviteCode.toUpperCase());
     if (!server) return res.status(404).json({ error: 'davet kodu gecersiz' });
+    if (await db.getServerBan(server.id, req.userId)) return res.status(403).json({ error: 'bu topluluktan yasaklandin' });
     const already = await db.getServerMember(server.id, req.userId);
-    if (already) return res.status(409).json({ error: 'zaten bu sunucunun uyesisin' });
+    if (already) return res.status(409).json({ error: 'zaten bu toplulugun uyesisin' });
     await db.addServerMember(server.id, req.userId, 'member');
-    res.json({ id: server.id, name: server.name, role: 'member' });
+    await db.addServerAuditLog(server.id, req.userId, 'member_joined', req.username);
+    emitToServerMembers(server.id, 'server-members-updated', { serverId: server.id }).catch(() => {});
+    res.json({ id: server.id, name: server.name, iconId: server.icon_id, role: 'member' });
   })
 );
 
@@ -754,18 +882,23 @@ app.get(
     const serverId = Number(req.params.id);
     const ctx = await requireServerMembership(req, res, serverId);
     if (!ctx) return;
-    const [members, channels] = await Promise.all([db.listServerMembers(serverId), db.listChannels(serverId, 'voice')]);
+    const [members, channels, unreadByChannel] = await Promise.all([
+      db.listServerMembers(serverId),
+      db.listChannels(serverId),
+      db.getUnreadCountsByChannel(serverId, req.userId),
+    ]);
     res.json({
       id: ctx.server.id,
       name: ctx.server.name,
+      iconId: ctx.server.icon_id,
       role: ctx.member.role,
       inviteCode: ctx.member.role === 'owner' ? ctx.server.invite_code : undefined,
       members: members.map(publicServerMember),
-      channels: channels.map((c) => ({
-        id: c.id,
-        name: c.name,
-        memberCount: rooms.get(`CH${c.id}`)?.members.size || 0,
-      })),
+      channels: channels.map((c) =>
+        c.type === 'text'
+          ? { id: c.id, name: c.name, type: 'text', position: Number(c.position), unreadCount: unreadByChannel.get(c.id) || 0 }
+          : { id: c.id, name: c.name, type: 'voice', position: Number(c.position), memberCount: rooms.get(`CH${c.id}`)?.members.size || 0 }
+      ),
     });
   })
 );
@@ -779,12 +912,19 @@ app.post(
     const ctx = await requireServerMembership(req, res, serverId);
     if (!ctx) return;
     if (ctx.member.role !== 'owner' && ctx.member.role !== 'moderator') {
-      return res.status(403).json({ error: 'yalnizca sahip veya moderator kanal olusturabilir' });
+      return res.status(403).json({ error: 'yalnizca topluluk sahibi veya moderator kanal olusturabilir' });
     }
-    const { name } = req.body || {};
+    const { name, type } = req.body || {};
     if (!isValidServerOrChannelName(name)) return res.status(400).json({ error: 'gecersiz kanal adi (2-40 karakter)' });
-    const channelId = await db.createChannel(serverId, name.trim(), 'voice');
-    const payload = { id: channelId, name: name.trim(), memberCount: 0 };
+    const channelType = type === undefined ? 'text' : type;
+    if (!isValidChannelType(channelType)) return res.status(400).json({ error: "kanal turu 'text' veya 'voice' olmali" });
+    const channelId = await db.createChannel(serverId, name.trim(), channelType);
+    const createdChannel = await db.getChannelById(channelId);
+    const payload =
+      channelType === 'text'
+        ? { id: channelId, name: name.trim(), type: 'text', position: Number(createdChannel.position), unreadCount: 0 }
+        : { id: channelId, name: name.trim(), type: 'voice', position: Number(createdChannel.position), memberCount: 0 };
+    await db.addServerAuditLog(serverId, req.userId, 'channel_created', name.trim(), channelType);
     for (const m of await db.listServerMembers(serverId)) emitToUser(m.username, 'server-channel-created', { serverId, channel: payload });
     res.json(payload);
   })
@@ -811,8 +951,160 @@ app.delete(
       rooms.delete(roomCode);
     }
     await db.deleteChannel(channelId);
+    await db.addServerAuditLog(serverId, req.userId, 'channel_deleted', channel.name, channel.type);
     for (const m of await db.listServerMembers(serverId)) emitToUser(m.username, 'server-channel-deleted', { serverId, channelId });
     res.json({ ok: true });
+  })
+);
+
+// Bir metin kanali islemi icin uyelik VE kanalin gercekten o topluluga ait
+// oldugunu dogrular; channelId'nin baska bir topluluga ait olma ihtimaline
+// karsi server_id her zaman kanal satirindan (istemciden degil) okunur.
+async function requireTextChannelAccess(req, res, serverId, channelId) {
+  const channel = await db.getChannelById(channelId);
+  if (!channel || channel.type !== 'text' || channel.server_id !== serverId) {
+    res.status(404).json({ error: 'kanal bulunamadi' });
+    return null;
+  }
+  const member = await db.getServerMember(serverId, req.userId);
+  if (!member) {
+    res.status(403).json({ error: 'bu toplulugun uyesi degilsin' });
+    return null;
+  }
+  return { channel, member };
+}
+
+app.get(
+  '/api/servers/:id/channels/:channelId/messages',
+  requireAuth,
+  asyncRoute(async (req, res) => {
+    const serverId = Number(req.params.id);
+    const channelId = Number(req.params.channelId);
+    const ctx = await requireTextChannelAccess(req, res, serverId, channelId);
+    if (!ctx) return;
+    const beforeRaw = Number(req.query.before);
+    const before = Number.isFinite(beforeRaw) && beforeRaw > 0 ? beforeRaw : undefined;
+    const rows = await db.getServerMessages(channelId, { before, limit: 50 });
+    res.json({
+      messages: rows.map((m) => ({
+        id: m.id,
+        channelId,
+        from: m.username,
+        avatarId: publicAvatar(m),
+        text: m.text,
+        ts: Number(m.created_at),
+      })),
+    });
+  })
+);
+
+app.post(
+  '/api/servers/:id/channels/:channelId/read',
+  requireAuth,
+  asyncRoute(async (req, res) => {
+    const serverId = Number(req.params.id);
+    const channelId = Number(req.params.channelId);
+    const ctx = await requireTextChannelAccess(req, res, serverId, channelId);
+    if (!ctx) return;
+    await db.markChannelRead(req.userId, channelId, Date.now());
+    res.json({ ok: true });
+  })
+);
+
+app.post(
+  '/api/servers/:id/settings',
+  requireAuth,
+  friendLimiter,
+  asyncRoute(async (req, res) => {
+    const serverId = Number(req.params.id);
+    const ctx = await requireServerMembership(req, res, serverId);
+    if (!ctx) return;
+    if (ctx.member.role !== 'owner') return res.status(403).json({ error: 'yalnizca sahip topluluk ayarlarini degistirebilir' });
+    const name = typeof req.body?.name === 'string' ? req.body.name.trim() : ctx.server.name;
+    const iconId = req.body?.iconId === undefined ? ctx.server.icon_id : req.body.iconId;
+    if (!isValidServerOrChannelName(name)) return res.status(400).json({ error: 'gecersiz topluluk adi (2-40 karakter)' });
+    if (!isValidCommunityIcon(iconId, req.username)) return res.status(400).json({ error: 'gecersiz topluluk simgesi' });
+    await db.updateServerProfile(serverId, { name, iconId });
+    await db.addServerAuditLog(serverId, req.userId, 'community_updated', name, iconId);
+    await emitToServerMembers(serverId, 'server-updated', { serverId, name, iconId });
+    res.json({ ok: true, name, iconId });
+  })
+);
+
+app.post(
+  '/api/servers/:id/channels/:channelId/rename',
+  requireAuth,
+  friendLimiter,
+  asyncRoute(async (req, res) => {
+    const serverId = Number(req.params.id);
+    const channelId = Number(req.params.channelId);
+    const ctx = await requireServerMembership(req, res, serverId);
+    if (!ctx) return;
+    if (ctx.member.role !== 'owner' && ctx.member.role !== 'moderator') return res.status(403).json({ error: 'yetkin yok' });
+    const channel = await db.getChannelById(channelId);
+    if (!channel || Number(channel.server_id) !== serverId) return res.status(404).json({ error: 'kanal bulunamadi' });
+    const name = typeof req.body?.name === 'string' ? req.body.name.trim() : '';
+    if (!isValidServerOrChannelName(name)) return res.status(400).json({ error: 'gecersiz kanal adi (2-40 karakter)' });
+    await db.renameChannel(channelId, name);
+    await db.addServerAuditLog(serverId, req.userId, 'channel_renamed', channel.name, name);
+    await emitToServerMembers(serverId, 'server-channel-updated', { serverId, channelId, name });
+    res.json({ ok: true, name });
+  })
+);
+
+app.post(
+  '/api/servers/:id/channels/reorder',
+  requireAuth,
+  friendLimiter,
+  asyncRoute(async (req, res) => {
+    const serverId = Number(req.params.id);
+    const ctx = await requireServerMembership(req, res, serverId);
+    if (!ctx) return;
+    if (ctx.member.role !== 'owner' && ctx.member.role !== 'moderator') return res.status(403).json({ error: 'yetkin yok' });
+    const channelIds = Array.isArray(req.body?.channelIds) ? req.body.channelIds.map(Number) : [];
+    const channels = await db.listChannels(serverId);
+    const expected = channels.map((channel) => Number(channel.id)).sort((a, b) => a - b);
+    const received = [...channelIds].sort((a, b) => a - b);
+    if (channelIds.length !== expected.length || new Set(channelIds).size !== channelIds.length || expected.some((id, index) => id !== received[index])) {
+      return res.status(400).json({ error: 'kanal sirasi tum kanallari tam olarak icermeli' });
+    }
+    await db.reorderChannels(serverId, channelIds);
+    await db.addServerAuditLog(serverId, req.userId, 'channels_reordered');
+    await emitToServerMembers(serverId, 'server-channels-reordered', { serverId, channelIds });
+    res.json({ ok: true });
+  })
+);
+
+app.post(
+  '/api/servers/:id/transfer',
+  requireAuth,
+  friendLimiter,
+  asyncRoute(async (req, res) => {
+    const serverId = Number(req.params.id);
+    const ctx = await requireServerMembership(req, res, serverId);
+    if (!ctx) return;
+    if (ctx.member.role !== 'owner') return res.status(403).json({ error: 'yalnizca sahip sahipligi devredebilir' });
+    const targetUsername = req.body?.username;
+    if (!isValidUsername(targetUsername) || targetUsername.toLowerCase() === req.username.toLowerCase()) return res.status(400).json({ error: 'gecersiz hedef kullanici' });
+    const target = await db.getUserByUsername(targetUsername);
+    if (!target || !(await db.getServerMember(serverId, target.id))) return res.status(404).json({ error: 'hedef topluluk uyesi degil' });
+    await db.transferServerOwnership(serverId, req.userId, target.id);
+    await db.addServerAuditLog(serverId, req.userId, 'ownership_transferred', target.username);
+    await emitToServerMembers(serverId, 'server-owner-transferred', { serverId, oldOwner: req.username, newOwner: target.username });
+    res.json({ ok: true });
+  })
+);
+
+app.get(
+  '/api/servers/:id/audit-log',
+  requireAuth,
+  asyncRoute(async (req, res) => {
+    const serverId = Number(req.params.id);
+    const ctx = await requireServerMembership(req, res, serverId);
+    if (!ctx) return;
+    if (ctx.member.role !== 'owner' && ctx.member.role !== 'moderator') return res.status(403).json({ error: 'yetkin yok' });
+    const rows = await db.listServerAuditLog(serverId);
+    res.json({ entries: rows.map((row) => ({ ...row, created_at: Number(row.created_at) })) });
   })
 );
 
@@ -826,6 +1118,7 @@ app.post(
     if (!ctx) return;
     if (ctx.member.role !== 'owner') return res.status(403).json({ error: 'yalnizca sahip davet kodunu yenileyebilir' });
     const inviteCode = await db.regenerateInviteCode(serverId);
+    await db.addServerAuditLog(serverId, req.userId, 'invite_regenerated');
     res.json({ inviteCode });
   })
 );
@@ -847,8 +1140,9 @@ app.post(
     if (!target) return res.status(404).json({ error: 'kullanici bulunamadi' });
     if (target.id === req.userId) return res.status(400).json({ error: 'kendi rolunu degistiremezsin' });
     const targetMember = await db.getServerMember(serverId, target.id);
-    if (!targetMember) return res.status(404).json({ error: 'kullanici bu sunucunun uyesi degil' });
+    if (!targetMember) return res.status(404).json({ error: 'kullanici bu toplulugun uyesi degil' });
     await db.setServerMemberRole(serverId, target.id, role);
+    await db.addServerAuditLog(serverId, req.userId, 'member_role_changed', target.username, role);
     emitToUser(target.username, 'server-role-changed', { serverId, role });
     res.json({ ok: true, role });
   })
@@ -868,7 +1162,7 @@ app.post(
     if (!target) return res.status(404).json({ error: 'kullanici bulunamadi' });
     if (target.id === req.userId) return res.status(400).json({ error: 'kendini bu yoldan cikaramazsin' });
     const targetMember = await db.getServerMember(serverId, target.id);
-    if (!targetMember) return res.status(404).json({ error: 'kullanici bu sunucunun uyesi degil' });
+    if (!targetMember) return res.status(404).json({ error: 'kullanici bu toplulugun uyesi degil' });
 
     const requesterIsOwner = ctx.member.role === 'owner';
     const requesterIsMod = ctx.member.role === 'moderator';
@@ -878,8 +1172,62 @@ app.post(
     }
 
     await db.removeServerMember(serverId, target.id);
+    await db.addServerAuditLog(serverId, req.userId, 'member_removed', target.username);
     kickUserFromServerVoiceChannels(serverId, target.id);
     emitToUser(target.username, 'server-removed', { serverId });
+    res.json({ ok: true });
+  })
+);
+
+app.get(
+  '/api/servers/:id/bans',
+  requireAuth,
+  asyncRoute(async (req, res) => {
+    const serverId = Number(req.params.id);
+    const ctx = await requireServerMembership(req, res, serverId);
+    if (!ctx) return;
+    if (ctx.member.role !== 'owner' && ctx.member.role !== 'moderator') return res.status(403).json({ error: 'yetkin yok' });
+    const bans = await db.listServerBans(serverId);
+    res.json({ bans: bans.map((row) => ({ username: row.username, avatarId: publicAvatar(row), reason: row.reason, bannedBy: row.banned_by, createdAt: Number(row.created_at) })) });
+  })
+);
+
+app.post(
+  '/api/servers/:id/members/:username/ban',
+  requireAuth,
+  friendLimiter,
+  asyncRoute(async (req, res) => {
+    const serverId = Number(req.params.id);
+    const ctx = await requireServerMembership(req, res, serverId);
+    if (!ctx) return;
+    const target = await db.getUserByUsername(req.params.username);
+    if (!target) return res.status(404).json({ error: 'kullanici bulunamadi' });
+    const targetMember = await db.getServerMember(serverId, target.id);
+    if (!targetMember) return res.status(404).json({ error: 'kullanici bu toplulugun uyesi degil' });
+    if (targetMember.role === 'owner' || target.id === req.userId) return res.status(403).json({ error: 'bu kullanici yasaklanamaz' });
+    const allowed = ctx.member.role === 'owner' || (ctx.member.role === 'moderator' && targetMember.role === 'member');
+    if (!allowed) return res.status(403).json({ error: 'bu kullaniciyi yasaklama yetkin yok' });
+    const reason = typeof req.body?.reason === 'string' ? req.body.reason.trim().slice(0, 300) : '';
+    await db.banServerMember(serverId, target.id, req.userId, reason);
+    await db.addServerAuditLog(serverId, req.userId, 'member_banned', target.username, reason);
+    kickUserFromServerVoiceChannels(serverId, target.id);
+    emitToUser(target.username, 'server-removed', { serverId, banned: true });
+    await emitToServerMembers(serverId, 'server-members-updated', { serverId });
+    res.json({ ok: true });
+  })
+);
+
+app.delete(
+  '/api/servers/:id/bans/:username',
+  requireAuth,
+  asyncRoute(async (req, res) => {
+    const serverId = Number(req.params.id);
+    const ctx = await requireServerMembership(req, res, serverId);
+    if (!ctx) return;
+    if (ctx.member.role !== 'owner' && ctx.member.role !== 'moderator') return res.status(403).json({ error: 'yetkin yok' });
+    const target = await db.getUserByUsername(req.params.username);
+    if (target) await db.unbanServerMember(serverId, target.id);
+    await db.addServerAuditLog(serverId, req.userId, 'member_unbanned', req.params.username);
     res.json({ ok: true });
   })
 );
@@ -893,9 +1241,10 @@ app.post(
     const ctx = await requireServerMembership(req, res, serverId);
     if (!ctx) return;
     if (ctx.member.role === 'owner') {
-      return res.status(400).json({ error: 'sahip sunucudan ayrilamaz; silmek istersen sunucuyu sil' });
+      return res.status(400).json({ error: 'sahip topluluktan ayrilamaz; silmek istersen toplulugu sil' });
     }
     await db.removeServerMember(serverId, req.userId);
+    await db.addServerAuditLog(serverId, req.userId, 'member_left', req.username);
     kickUserFromServerVoiceChannels(serverId, req.userId);
     res.json({ ok: true });
   })
@@ -908,7 +1257,7 @@ app.delete(
     const serverId = Number(req.params.id);
     const ctx = await requireServerMembership(req, res, serverId);
     if (!ctx) return;
-    if (ctx.member.role !== 'owner') return res.status(403).json({ error: 'yalnizca sahip sunucuyu silebilir' });
+    if (ctx.member.role !== 'owner') return res.status(403).json({ error: 'yalnizca sahip toplulugu silebilir' });
 
     const members = await db.listServerMembers(serverId);
     const channels = await db.listChannels(serverId);
@@ -958,17 +1307,22 @@ io.on('connection', (socket) => {
   let lastCallAttempt = 0;
   let chatTimestamps = [];
   let dmTimestamps = [];
+  let serverMsgTimestamps = [];
   const seenDmClientIds = new Map();
 
   const cameOnline = addOnlineSocket(usernameKey, socket.id);
   socket.emit('authenticated', { username, avatarId: socket.data.avatarId });
-  if (cameOnline) notifyFriends(userId, 'friend-online', { username }).catch((err) => console.error(err.message));
+  if (cameOnline) {
+    notifyFriends(userId, 'friend-online', { username }).catch((err) => console.error(err.message));
+    notifyCommunityPresence(userId, username, true).catch((err) => console.error(err.message));
+  }
 
   function leaveCurrentRoom() {
     if (!socket.data.currentRoom) return;
     const room = rooms.get(socket.data.currentRoom);
     if (room) {
       room.members.delete(socket.id);
+      publishServerChannelCount(room);
       socket.to(socket.data.currentRoom).emit('peer-left', { id: socket.id });
       if (room.ownerUserId && ownerActiveRoom.get(room.ownerUserId) === socket.data.currentRoom && !isOwnerInRoom(room)) {
         ownerActiveRoom.delete(room.ownerUserId);
@@ -1047,7 +1401,7 @@ io.on('connection', (socket) => {
       const channel = await db.getChannelById(channelId);
       if (!channel || channel.type !== 'voice') return ack({ error: 'kanal bulunamadi' });
       const member = await db.getServerMember(channel.server_id, userId);
-      if (!member) return ack({ error: 'bu sunucunun uyesi degilsin' });
+      if (!member) return ack({ error: 'bu toplulugun uyesi degilsin' });
 
       const roomCode = getOrCreateChannelRoom(channel);
       const room = rooms.get(roomCode);
@@ -1081,11 +1435,107 @@ io.on('connection', (socket) => {
       }));
 
       room.members.add(socket.id);
+      publishServerChannelCount(room);
       socket.to(roomCode).emit('peer-joined', { id: socket.id, displayName: username, avatarId: socket.data.avatarId });
 
       ack({ ok: true, roomCode, roomType: room.type, channelName: channel.name, existingPeers, chatHistory: room.messages });
     })().catch((err) => {
       console.error('join-server-channel hatasi:', err.message);
+      ack({ error: 'sunucu hatasi' });
+    });
+  });
+
+  // ---- topluluk metin kanali mesajlari ----
+  // Ses kanallarinin aksine katilim (Socket.IO room join) gerekmez: yeni
+  // mesaj her zaman toplulugun tum cevrimici uyelerine yayinlanir (ayni
+  // 'server-channel-created' vb. olaylarin izledigi desen), istemci mesaji
+  // acik kanala aitse gosterir, degilse yalnizca okunmamis sayacini artirir.
+  // Uyelik ve yetki her istekte sunucuda (DB'den) yeniden dogrulanir.
+
+  socket.on('send-server-message', (payload, ack) => {
+    if (typeof ack !== 'function') ack = () => {};
+    const channelId = Number(payload && payload.channelId);
+    if (!Number.isInteger(channelId) || channelId <= 0) return ack({ error: 'gecersiz kanal' });
+    const { text, clientMessageId } = payload || {};
+    if (typeof clientMessageId !== 'string' || clientMessageId.length === 0 || clientMessageId.length > 64) {
+      return ack({ error: 'gecersiz istek' });
+    }
+    if (typeof text !== 'string' || text.trim().length === 0) return ack({ error: 'bos mesaj gonderilemez' });
+    if (text.length > CHAT_MAX_LENGTH) return ack({ error: `mesaj cok uzun (en fazla ${CHAT_MAX_LENGTH} karakter)` });
+
+    const now = Date.now();
+    serverMsgTimestamps = serverMsgTimestamps.filter((t) => now - t < CHAT_RATE_WINDOW_MS);
+    if (serverMsgTimestamps.length >= CHAT_RATE_LIMIT) {
+      return ack({ error: 'cok hizli mesaj gonderiyorsun, biraz yavasla' });
+    }
+
+    (async () => {
+      const channel = await db.getChannelById(channelId);
+      if (!channel || channel.type !== 'text') return ack({ error: 'kanal bulunamadi' });
+      const member = await db.getServerMember(channel.server_id, userId);
+      if (!member) return ack({ error: 'bu toplulugun uyesi degilsin' });
+
+      serverMsgTimestamps.push(now);
+      const { id: messageId, duplicate } = await db.insertServerMessage({
+        id: crypto.randomUUID(),
+        serverId: channel.server_id,
+        channelId,
+        fromUserId: userId,
+        text,
+        createdAt: now,
+        clientMessageId,
+      });
+      if (!duplicate) await db.markChannelRead(userId, channelId, now);
+
+      const stored = await db.getServerMessageById(messageId);
+      const message = {
+        id: stored.id,
+        channelId,
+        serverId: channel.server_id,
+        from: stored.username,
+        avatarId: publicAvatar(stored),
+        text: stored.text,
+        ts: Number(stored.created_at),
+      };
+      ack({ ok: true, message });
+      if (!duplicate) {
+        emitToServerMembers(channel.server_id, 'server-text-message', message).catch((err) =>
+          console.error('server-text-message yayin hatasi:', err.message)
+        );
+      }
+    })().catch((err) => {
+      console.error('send-server-message hatasi:', err.message);
+      ack({ error: 'sunucu hatasi' });
+    });
+  });
+
+  socket.on('delete-server-message', (payload, ack) => {
+    if (typeof ack !== 'function') ack = () => {};
+    const { messageId } = payload || {};
+    if (typeof messageId !== 'string' || messageId.length === 0 || messageId.length > 64) {
+      return ack({ error: 'gecersiz istek' });
+    }
+
+    (async () => {
+      const message = await db.getServerMessageById(messageId);
+      if (!message) return ack({ error: 'mesaj bulunamadi' });
+      const member = await db.getServerMember(message.server_id, userId);
+      if (!member) return ack({ error: 'bu toplulugun uyesi degilsin' });
+
+      const isOwnMessage = Number(message.from_user_id) === userId;
+      const canModerate = member.role === 'owner' || member.role === 'moderator';
+      if (!isOwnMessage && !canModerate) return ack({ error: 'bu mesaji silme yetkin yok' });
+
+      await db.deleteServerMessage(messageId);
+      await db.addServerAuditLog(message.server_id, userId, isOwnMessage ? 'own_message_deleted' : 'message_moderated', message.username, messageId);
+      ack({ ok: true });
+      emitToServerMembers(message.server_id, 'server-message-deleted', {
+        serverId: message.server_id,
+        channelId: message.channel_id,
+        messageId,
+      }).catch((err) => console.error('server-message-deleted yayin hatasi:', err.message));
+    })().catch((err) => {
+      console.error('delete-server-message hatasi:', err.message);
       ack({ error: 'sunucu hatasi' });
     });
   });
@@ -1239,6 +1689,7 @@ io.on('connection', (socket) => {
       if (!target || !(await db.areFriends(userId, target.id))) {
         return ack({ error: 'bu kullaniciyla arkadas degilsiniz' });
       }
+      if (await db.isEitherUserBlocked(userId, target.id)) return ack({ error: 'bu kullaniciyla etkilesim engellendi' });
 
       dmTimestamps.push(now);
       const message = { id: crypto.randomUUID(), from: username, text, ts: now };
@@ -1257,7 +1708,7 @@ io.on('connection', (socket) => {
     });
   });
 
-  socket.on('call-friend', (payload, ack) => {
+  socket.on('call-friend', async (payload, ack) => {
     if (typeof ack !== 'function') ack = () => {};
     const { toUsername } = payload || {};
 
@@ -1268,6 +1719,12 @@ io.on('connection', (socket) => {
     if (!isValidUsername(toUsername)) return ack({ error: 'gecersiz kullanici adi' });
     if (toUsername.toLowerCase() === usernameKey) return ack({ error: 'kendini arayamazsin' });
     if (isUserBusy(usernameKey)) return ack({ error: 'once mevcut gorusmeni veya aramani bitir' });
+
+    const targetUser = await db.getUserByUsername(toUsername);
+    if (!targetUser || !(await db.areFriends(userId, targetUser.id)) || (await db.isEitherUserBlocked(userId, targetUser.id))) {
+      socket.emit('call-failed', { toUsername, reason: 'not-friends' });
+      return ack({ ok: true });
+    }
 
     const targetSet = onlineUsers.get(toUsername.toLowerCase());
     const targetSocketId = targetSet ? [...targetSet].pop() : null;
@@ -1375,6 +1832,7 @@ io.on('connection', (socket) => {
     removeOnlineSocket(usernameKey, socket.id);
     if (!onlineUsers.has(usernameKey)) {
       notifyFriends(userId, 'friend-offline', { username }).catch((err) => console.error(err.message));
+      notifyCommunityPresence(userId, username, false).catch((err) => console.error(err.message));
       if (gameStatusByUsername.has(usernameKey)) {
         gameStatusByUsername.delete(usernameKey);
         notifyFriends(userId, 'friend-game-status', { username, game: null }).catch((err) => console.error(err.message));

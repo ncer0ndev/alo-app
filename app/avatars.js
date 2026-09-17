@@ -22,6 +22,14 @@
     paint(element, avatarFor(username, fallback));
     return element;
   }
+  function imageForId(avatarId, className = 'user-avatar') {
+    const element = document.createElement('span');
+    element.className = className;
+    element.setAttribute('role', 'img');
+    const avatar = catalog.find(a => a.id === avatarId) || catalog.find(a => a.id === 'robot');
+    paint(element, avatar);
+    return element;
+  }
   function remember(username, avatarId) {
     if (!username || !avatarId) return;
     profiles.set(username.toLowerCase(), avatarId);
@@ -75,5 +83,5 @@
     if (avatarId) remember(username, avatarId);
     renderPicker();
   }
-  window.profileAvatars = { image, remember, setAccount };
+  window.profileAvatars = { image, imageForId, remember, setAccount };
 })();

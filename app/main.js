@@ -29,6 +29,7 @@ function runApp() {
   const callNotifications = new Map(); // roomCode -> Notification
   const chatNotifyState = new Map(); // roomCode -> { timer, count, lastFrom, lastText, showContent }
   const dmNotifyState = new Map(); // fromUsername -> { timer, count, lastText, showContent }
+  const communityNotifyState = new Map(); // "serverId:channelId" -> { timer, count, lastFrom, lastText, showContent }
 
   const GAME_DETECTION_INTERVAL_MS = 20_000;
   const gameCatalogMap = new Map(GAME_CATALOG.map((g) => [g.process.toLowerCase(), g.name]));
@@ -144,8 +145,10 @@ function runApp() {
 
   function createWindow() {
     mainWindow = new BrowserWindow({
-      width: 460,
-      height: 700,
+      width: 1180,
+      height: 780,
+      minWidth: 720,
+      minHeight: 560,
       resizable: true,
       autoHideMenuBar: false,
       backgroundColor: '#0a0a0a',
@@ -384,6 +387,41 @@ function runApp() {
     }, CHAT_NOTIFY_DEBOUNCE_MS);
   });
 
+  ipcMain.on('notify-community-message', (event, payload) => {
+    if (!isTrustedSender(event)) return;
+    const { serverId, channelId, channelName, fromUsername, text, showContent } = payload || {};
+    if (!Number.isInteger(serverId) || !Number.isInteger(channelId)) return;
+    if (!isNonEmptyString(channelName, 40) || !isNonEmptyString(fromUsername, 64) || typeof text !== 'string') return;
+    if (!shouldShowBackgroundNotification()) return;
+
+    const key = `${serverId}:${channelId}`;
+    let state = communityNotifyState.get(key);
+    if (!state) {
+      state = { timer: null, count: 0, lastFrom: '', lastText: '', showContent: false };
+      communityNotifyState.set(key, state);
+    }
+    state.count += 1;
+    state.lastFrom = fromUsername;
+    state.lastText = text.slice(0, 120);
+    state.showContent = showContent === true;
+    if (state.timer) return;
+
+    state.timer = setTimeout(() => {
+      communityNotifyState.delete(key);
+      const body =
+        state.count > 1
+          ? `${state.count} yeni mesaj`
+          : state.showContent
+          ? `${state.lastFrom}: ${state.lastText}`
+          : `${state.lastFrom}: Yeni mesaj`;
+      const notification = showSystemNotification({ title: `# ${channelName}`, body });
+      notification?.on('click', () => {
+        showAndFocus();
+        mainWindow?.webContents.send('notification-community-clicked', { serverId, channelId });
+      });
+    }, CHAT_NOTIFY_DEBOUNCE_MS);
+  });
+
   app.on('window-all-closed', () => {
     if (process.platform !== 'darwin') app.quit();
   });
@@ -406,6 +444,10 @@ function runApp() {
       if (state.timer) clearTimeout(state.timer);
     }
     dmNotifyState.clear();
+    for (const state of communityNotifyState.values()) {
+      if (state.timer) clearTimeout(state.timer);
+    }
+    communityNotifyState.clear();
     if (gameDetectionTimer) {
       clearInterval(gameDetectionTimer);
       gameDetectionTimer = null;
