@@ -101,6 +101,34 @@
 
 * {
   box-sizing: border-box;
+  scrollbar-width: thin;
+  scrollbar-color: var(--dim) transparent;
+}
+
+/* Modern, ince kaydirma cubugu (Chromium/Electron); .chat-input kendi
+   ozel kuraliyla (asagida) bunu eziyor ve tamamen gizli kaliyor. */
+*::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+*::-webkit-scrollbar-thumb {
+  background-color: var(--dim);
+  border-radius: 999px;
+  border: 2px solid var(--bg);
+  background-clip: padding-box;
+}
+
+*::-webkit-scrollbar-thumb:hover {
+  background-color: var(--fg);
+}
+
+*::-webkit-scrollbar-corner {
+  background: transparent;
 }
 
 html, body {
