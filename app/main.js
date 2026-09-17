@@ -1,7 +1,10 @@
-const { app, BrowserWindow } = require('electron');
+const { app, BrowserWindow, ipcMain, globalShortcut } = require('electron');
+
+let mainWindow;
+let currentPttAccelerator = null;
 
 function createWindow() {
-  const win = new BrowserWindow({
+  mainWindow = new BrowserWindow({
     width: 460,
     height: 700,
     resizable: true,
@@ -12,7 +15,7 @@ function createWindow() {
       contextIsolation: false,
     },
   });
-  win.loadFile('index.html');
+  mainWindow.loadFile('index.html');
 }
 
 app.whenReady().then(() => {
@@ -22,6 +25,30 @@ app.whenReady().then(() => {
   });
 });
 
+function unregisterPtt() {
+  if (currentPttAccelerator) {
+    globalShortcut.unregister(currentPttAccelerator);
+    currentPttAccelerator = null;
+  }
+}
+
+ipcMain.on('register-ptt-shortcut', (event, { key }) => {
+  unregisterPtt();
+  const success = globalShortcut.register(key, () => {
+    mainWindow?.webContents.send('ptt-toggle');
+  });
+  currentPttAccelerator = success ? key : null;
+  event.reply('ptt-register-result', { success, key });
+});
+
+ipcMain.on('unregister-ptt-shortcut', () => {
+  unregisterPtt();
+});
+
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') app.quit();
+});
+
+app.on('will-quit', () => {
+  globalShortcut.unregisterAll();
 });

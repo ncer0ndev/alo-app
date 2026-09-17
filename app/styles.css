@@ -129,6 +129,45 @@ input:focus {
   text-shadow: 0 0 4px rgba(51, 255, 0, 0.5);
 }
 
+select {
+  flex: 1;
+  min-width: 0;
+  background: var(--bg);
+  border: none;
+  border-bottom: 1px dashed var(--border);
+  color: var(--fg);
+  font-family: inherit;
+  font-size: 13px;
+  padding: 6px 4px;
+}
+
+select:focus {
+  outline: none;
+  border-bottom: 1px solid var(--accent);
+}
+
+input[type="range"] {
+  width: 100%;
+  accent-color: var(--fg);
+  border-bottom: none;
+  padding: 0;
+  margin-bottom: 16px;
+}
+
+.radio-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 10px;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.radio-row input {
+  flex: 0 0 auto;
+  accent-color: var(--fg);
+}
+
 .btn-row {
   display: flex;
   flex-wrap: wrap;

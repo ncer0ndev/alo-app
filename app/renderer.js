@@ -1,5 +1,5 @@
 const { io } = require('socket.io-client');
-const { clipboard } = require('electron');
+const { clipboard, ipcRenderer } = require('electron');
 
 const ICE_SERVERS = [{ urls: 'stun:stun.l.google.com:19302' }];
 const SERVER_URL = 'https://alo-app.onrender.com';
@@ -43,12 +43,31 @@ const declineCallBtn = document.getElementById('decline-call-btn');
 const muteBtn = document.getElementById('mute-btn');
 const leaveBtn = document.getElementById('leave-btn');
 const participantsList = document.getElementById('participants');
+const micIndicator = document.getElementById('mic-indicator');
+
+const micSelect = document.getElementById('mic-select');
+const speakerSelect = document.getElementById('speaker-select');
+const micModeRadios = document.querySelectorAll('input[name="mic-mode"]');
+const vadSettingsSection = document.getElementById('vad-settings');
+const vadSensitivitySlider = document.getElementById('vad-sensitivity');
+const pttSettingsSection = document.getElementById('ptt-settings');
+const pttKeySelect = document.getElementById('ptt-key-select');
+const pttKeyStatusEl = document.getElementById('ptt-key-status');
+
+const PTT_KEY_OPTIONS = [
+  'Space', 'Insert', 'Home', 'End', 'PageUp', 'PageDown',
+  'F1', 'F2', 'F3', 'F4', 'F5', 'F6', 'F7', 'F8', 'F9', 'F10', 'F11', 'F12',
+  'Num0', 'Num1', 'Num2', 'Num3', 'Num4', 'Num5', 'Num6', 'Num7', 'Num8', 'Num9',
+];
 
 let socket = null;
 let localStream = null;
 let muted = false;
 let pendingIncomingCall = null;
 let currentRoomCode = null;
+let audioContext = null;
+let vadRafId = null;
+let vadLastActiveTime = 0;
 const peerConnections = {};
 const audioElements = {};
 const participantNames = {};
@@ -70,6 +89,20 @@ function setFriendStatus(text, kind = 'info') {
 
 function getServerUrl() {
   return SERVER_URL;
+}
+
+function getSettings() {
+  return {
+    micMode: localStorage.getItem('micMode') || 'always',
+    pttKey: localStorage.getItem('pttKey') || 'Space',
+    vadSensitivity: Number(localStorage.getItem('vadSensitivity') || '50'),
+    micDeviceId: localStorage.getItem('micDeviceId') || '',
+    speakerDeviceId: localStorage.getItem('speakerDeviceId') || '',
+  };
+}
+
+function saveSetting(key, value) {
+  localStorage.setItem(key, value);
 }
 
 function showScreen(screen) {
@@ -137,6 +170,148 @@ function enterJoinScreen(username) {
 function showTab(tabName) {
   tabBtns.forEach((btn) => btn.classList.toggle('active', btn.dataset.tab === tabName));
   tabContents.forEach((content) => content.classList.toggle('hidden', content.id !== `tab-${tabName}`));
+  if (tabName === 'settings') initSettingsTab();
+}
+
+function updateModeVisibility() {
+  const mode = getSettings().micMode;
+  vadSettingsSection.classList.toggle('hidden', mode !== 'voice');
+  pttSettingsSection.classList.toggle('hidden', mode !== 'ptt');
+}
+
+function initSettingsTab() {
+  const settings = getSettings();
+  micModeRadios.forEach((radio) => {
+    radio.checked = radio.value === settings.micMode;
+  });
+  vadSensitivitySlider.value = settings.vadSensitivity;
+
+  if (pttKeySelect.options.length === 0) {
+    PTT_KEY_OPTIONS.forEach((key) => {
+      const opt = document.createElement('option');
+      opt.value = key;
+      opt.textContent = key;
+      pttKeySelect.appendChild(opt);
+    });
+  }
+  pttKeySelect.value = settings.pttKey;
+
+  updateModeVisibility();
+  populateDeviceLists();
+}
+
+async function ensureMicPermission() {
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    stream.getTracks().forEach((t) => t.stop());
+  } catch {
+    // izin verilmemis olabilir; enumerateDevices yine calisir ama etiketler bos gelir
+  }
+}
+
+async function populateDeviceLists() {
+  await ensureMicPermission();
+  const devices = await navigator.mediaDevices.enumerateDevices();
+  const settings = getSettings();
+
+  const mics = devices.filter((d) => d.kind === 'audioinput');
+  micSelect.innerHTML = '';
+  mics.forEach((d, i) => {
+    const opt = document.createElement('option');
+    opt.value = d.deviceId;
+    opt.textContent = d.label || `mikrofon ${i + 1}`;
+    micSelect.appendChild(opt);
+  });
+  if (settings.micDeviceId) micSelect.value = settings.micDeviceId;
+
+  const speakers = devices.filter((d) => d.kind === 'audiooutput');
+  speakerSelect.innerHTML = '';
+  speakers.forEach((d, i) => {
+    const opt = document.createElement('option');
+    opt.value = d.deviceId;
+    opt.textContent = d.label || `hoparlor ${i + 1}`;
+    speakerSelect.appendChild(opt);
+  });
+  if (settings.speakerDeviceId) speakerSelect.value = settings.speakerDeviceId;
+}
+
+function setMicEnabled(enabled) {
+  if (!localStream) return;
+  localStream.getAudioTracks().forEach((t) => (t.enabled = enabled));
+  if (getSettings().micMode !== 'always') {
+    micIndicator.textContent = enabled ? '[ MIC ACIK ]' : '[ MIC KAPALI ]';
+    micIndicator.className = `status-line ${enabled ? 'ok' : ''}`;
+  }
+}
+
+function stopVoiceActivation() {
+  if (vadRafId) {
+    cancelAnimationFrame(vadRafId);
+    vadRafId = null;
+  }
+  if (audioContext) {
+    audioContext.close();
+    audioContext = null;
+  }
+}
+
+function startVoiceActivation() {
+  audioContext = new AudioContext();
+  const source = audioContext.createMediaStreamSource(localStream);
+  const analyser = audioContext.createAnalyser();
+  analyser.fftSize = 512;
+  source.connect(analyser);
+  const data = new Uint8Array(analyser.frequencyBinCount);
+
+  function loop() {
+    analyser.getByteTimeDomainData(data);
+    let sumSquares = 0;
+    for (let i = 0; i < data.length; i++) {
+      const v = (data[i] - 128) / 128;
+      sumSquares += v * v;
+    }
+    const level = Math.sqrt(sumSquares / data.length);
+    const sensitivity = getSettings().vadSensitivity;
+    const threshold = 0.35 - (sensitivity / 100) * 0.33;
+
+    const now = performance.now();
+    if (level > threshold) vadLastActiveTime = now;
+    setMicEnabled(now - vadLastActiveTime < 300);
+
+    vadRafId = requestAnimationFrame(loop);
+  }
+  loop();
+}
+
+function updatePttConfig() {
+  const settings = getSettings();
+  if (settings.micMode === 'ptt' && localStream) {
+    ipcRenderer.send('register-ptt-shortcut', { key: settings.pttKey });
+  } else {
+    ipcRenderer.send('unregister-ptt-shortcut');
+  }
+}
+
+function applyMicMode() {
+  stopVoiceActivation();
+  muted = false;
+  const mode = getSettings().micMode;
+
+  if (mode === 'always') {
+    muteBtn.classList.remove('hidden');
+    micIndicator.classList.add('hidden');
+    setMicEnabled(true);
+  } else if (mode === 'ptt') {
+    muteBtn.classList.add('hidden');
+    micIndicator.classList.remove('hidden');
+    setMicEnabled(false);
+  } else if (mode === 'voice') {
+    muteBtn.classList.add('hidden');
+    micIndicator.classList.remove('hidden');
+    startVoiceActivation();
+  }
+
+  updatePttConfig();
 }
 
 function generateRoomCode() {
@@ -400,6 +575,10 @@ function createPeerConnection(peerId) {
       audioElements[peerId] = audio;
     }
     audio.srcObject = event.streams[0];
+    const speakerId = getSettings().speakerDeviceId;
+    if (speakerId && audio.setSinkId) {
+      audio.setSinkId(speakerId).catch(() => {});
+    }
   };
 
   peerConnections[peerId] = pc;
@@ -444,8 +623,11 @@ function cleanupPeer(peerId) {
 }
 
 async function joinRoomWithCode(roomCode) {
+  const settings = getSettings();
   try {
-    localStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    localStream = await navigator.mediaDevices.getUserMedia({
+      audio: settings.micDeviceId ? { deviceId: { exact: settings.micDeviceId } } : true,
+    });
   } catch (err) {
     setStatus('mikrofona erisilemedi: ' + err.message, 'error');
     return;
@@ -457,6 +639,7 @@ async function joinRoomWithCode(roomCode) {
   roomCodeDisplay.textContent = roomCode;
   showScreen(roomScreen);
   renderParticipants(getSession().username);
+  applyMicMode();
 }
 
 function joinRoom() {
@@ -471,9 +654,11 @@ function joinRoom() {
 function leaveRoom() {
   if (socket) socket.emit('leave-room');
   Object.keys(peerConnections).forEach(cleanupPeer);
+  stopVoiceActivation();
   if (localStream) localStream.getTracks().forEach((t) => t.stop());
   localStream = null;
   currentRoomCode = null;
+  updatePttConfig();
 
   showScreen(joinScreen);
   setStatus('');
@@ -497,6 +682,48 @@ leaveBtn.addEventListener('click', leaveRoom);
 muteBtn.addEventListener('click', toggleMute);
 
 tabBtns.forEach((btn) => btn.addEventListener('click', () => showTab(btn.dataset.tab)));
+
+micSelect.addEventListener('change', () => saveSetting('micDeviceId', micSelect.value));
+
+speakerSelect.addEventListener('change', () => {
+  saveSetting('speakerDeviceId', speakerSelect.value);
+  Object.values(audioElements).forEach((audio) => {
+    if (audio.setSinkId) audio.setSinkId(speakerSelect.value).catch(() => {});
+  });
+});
+
+micModeRadios.forEach((radio) => {
+  radio.addEventListener('change', () => {
+    if (!radio.checked) return;
+    saveSetting('micMode', radio.value);
+    updateModeVisibility();
+    if (localStream) applyMicMode();
+  });
+});
+
+vadSensitivitySlider.addEventListener('input', () => {
+  saveSetting('vadSensitivity', vadSensitivitySlider.value);
+});
+
+pttKeySelect.addEventListener('change', () => {
+  saveSetting('pttKey', pttKeySelect.value);
+  updatePttConfig();
+});
+
+ipcRenderer.on('ptt-toggle', () => {
+  if (!localStream) return;
+  const currentlyEnabled = localStream.getAudioTracks()[0]?.enabled;
+  setMicEnabled(!currentlyEnabled);
+});
+
+ipcRenderer.on('ptt-register-result', (_event, { success, key }) => {
+  if (!success) {
+    pttKeyStatusEl.textContent = `[ERROR] ${key} tusu baska bir uygulama tarafindan kullaniliyor, baska tus sec`;
+    pttKeyStatusEl.className = 'status-line error';
+  } else {
+    pttKeyStatusEl.textContent = '';
+  }
+});
 
 acceptCallBtn.addEventListener('click', () => {
   if (!pendingIncomingCall) return;

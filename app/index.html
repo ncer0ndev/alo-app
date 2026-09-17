@@ -54,6 +54,7 @@
           <button class="tab-btn active" data-tab="friends">[ ARKADASLAR ]</button>
           <button class="tab-btn" data-tab="create">[ ODA OLUSTUR ]</button>
           <button class="tab-btn" data-tab="join">[ ODAYA KATIL ]</button>
+          <button class="tab-btn" data-tab="settings">[ AYARLAR ]</button>
           <button class="tab-btn" data-tab="profile">[ PROFIL ]</button>
         </div>
 
@@ -91,6 +92,49 @@
           <button id="join-btn" class="btn btn-block">[ ODAYA KATIL ]</button>
         </div>
 
+        <div id="tab-settings" class="tab-content hidden">
+          <div class="section-header">// mikrofon</div>
+          <label class="field">
+            <span class="prompt">in:~$</span>
+            <select id="mic-select"></select>
+          </label>
+
+          <div class="section-header">// hoparlor</div>
+          <label class="field">
+            <span class="prompt">out:~$</span>
+            <select id="speaker-select"></select>
+          </label>
+
+          <div class="section-header">// mikrofon modu</div>
+          <label class="radio-row">
+            <input type="radio" name="mic-mode" value="always" />
+            <span>her zaman acik</span>
+          </label>
+          <label class="radio-row">
+            <input type="radio" name="mic-mode" value="voice" />
+            <span>sesle aktif</span>
+          </label>
+          <label class="radio-row">
+            <input type="radio" name="mic-mode" value="ptt" />
+            <span>bas konus (tusla ac/kapa)</span>
+          </label>
+
+          <div id="vad-settings" class="hidden">
+            <div class="section-header">// hassasiyet</div>
+            <input id="vad-sensitivity" type="range" min="1" max="100" />
+          </div>
+
+          <div id="ptt-settings" class="hidden">
+            <div class="section-header">// bas konus tusu</div>
+            <label class="field">
+              <span class="prompt">tus:</span>
+              <select id="ptt-key-select"></select>
+            </label>
+            <p class="hint-text">not: bu tus sistem genelinde calisir. oyun icindeyken tusa basinca mikrofon acilir, tekrar basinca kapanir (basili tutma degil, ac/kapa mantigi).</p>
+            <p id="ptt-key-status" class="status-line"></p>
+          </div>
+        </div>
+
         <div id="tab-profile" class="tab-content hidden">
           <div class="section-header">// profil</div>
           <p id="profile-username" class="status-line ok"></p>
@@ -113,6 +157,7 @@
           <button id="mute-btn" class="btn">[ MIKROFONU KAPAT ]</button>
           <button id="leave-btn" class="btn btn-ghost">[ ODADAN AYRIL ]</button>
         </div>
+        <p id="mic-indicator" class="status-line hidden"></p>
         <div class="participants-header">// AKTIF KULLANICILAR</div>
         <ul id="participants" class="participants"></ul>
       </div>
