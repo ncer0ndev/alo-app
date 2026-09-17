@@ -73,8 +73,10 @@ const pttKeySelect = document.getElementById('ptt-key-select');
 const pttKeyStatusEl = document.getElementById('ptt-key-status');
 const micLevelBar = document.getElementById('mic-level-bar');
 const micTestBtn = document.getElementById('mic-test-btn');
+const themeRadios = document.querySelectorAll('input[name="theme-select"]');
 
 const PTT_KEY_OPTIONS = window.api?.pttKeyOptions || ['Space'];
+const VALID_THEMES = ['terminal', 'newsprint'];
 
 let socket = null;
 let localStream = null;
@@ -170,6 +172,25 @@ function getSettings() {
 
 function saveSetting(key, value) {
   localStorage.setItem(key, value);
+}
+
+// ---- tema ----
+// Tema secimi tamamen CSS/localStorage uzerinden calisir; gorusme, mikrofon,
+// soket baglantisi, sohbet gecmisi veya yazilmakta olan mesaj gibi hicbir
+// uygulama durumuna dokunmaz.
+
+function getTheme() {
+  const stored = localStorage.getItem('theme');
+  return VALID_THEMES.includes(stored) ? stored : 'terminal';
+}
+
+function applyTheme(theme) {
+  const safeTheme = VALID_THEMES.includes(theme) ? theme : 'terminal';
+  document.documentElement.setAttribute('data-theme', safeTheme);
+  localStorage.setItem('theme', safeTheme);
+  themeRadios.forEach((radio) => {
+    radio.checked = radio.value === safeTheme;
+  });
 }
 
 function showScreen(screen) {
@@ -273,6 +294,11 @@ function updateModeVisibility() {
 }
 
 function initSettingsTab() {
+  const currentTheme = getTheme();
+  themeRadios.forEach((radio) => {
+    radio.checked = radio.value === currentTheme;
+  });
+
   const settings = getSettings();
   micModeRadios.forEach((radio) => {
     radio.checked = radio.value === settings.micMode;
@@ -1381,6 +1407,13 @@ micModeRadios.forEach((radio) => {
   });
 });
 
+themeRadios.forEach((radio) => {
+  radio.addEventListener('change', () => {
+    if (!radio.checked) return;
+    applyTheme(radio.value);
+  });
+});
+
 vadSensitivitySlider.addEventListener('input', () => {
   saveSetting('vadSensitivity', vadSensitivitySlider.value);
 });
@@ -1430,6 +1463,11 @@ roomCodeInput.addEventListener('keydown', (e) => {
 });
 
 // ---- baslangic ----
+
+// theme-init.js ilk boyamadan once dogru data-theme'i zaten uyguladi; burada
+// sadece localStorage'daki degeri (gecersizse) kalici olarak duzeltiyoruz ve
+// ayarlar sekmesindeki radyo butonlarini senkronize ediyoruz.
+applyTheme(getTheme());
 
 const existingSession = getSession();
 if (existingSession.token && existingSession.username) {

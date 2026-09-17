@@ -2,14 +2,14 @@
 <html lang="tr">
 <head>
   <meta charset="UTF-8" />
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; connect-src 'self' https://alo-app.onrender.com wss://alo-app.onrender.com; img-src 'self'; media-src 'self' blob:; object-src 'none'; base-uri 'none'; form-action 'none';" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; font-src 'self'; connect-src 'self' https://alo-app.onrender.com wss://alo-app.onrender.com; img-src 'self'; media-src 'self' blob:; object-src 'none'; base-uri 'none'; form-action 'none';" />
   <title>Sesli Sohbet</title>
-  <link rel="preconnect" href="https://fonts.googleapis.com" />
-  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet" />
+  <script src="theme-init.js"></script>
+  <link rel="stylesheet" href="fonts/fonts.css" />
   <link rel="stylesheet" href="styles.css" />
 </head>
 <body>
-  <div class="crt-overlay"></div>
+  <div class="texture-overlay" aria-hidden="true"></div>
 
   <div id="toast" class="toast hidden" role="status" aria-live="polite"></div>
 
@@ -33,12 +33,13 @@
     </div>
   </div>
 
-  <div class="banner">
-    <pre>+==============================+
+  <header class="masthead">
+    <pre class="masthead-ascii" aria-hidden="true">+==============================+
 |      A L O  //  V O I C E     |
 +==============================+</pre>
+    <h1 class="masthead-title">ALO <span class="masthead-slash">//</span> VOICE</h1>
     <div class="cursor-line">SYSTEM_READY<span class="cursor">_</span></div>
-  </div>
+  </header>
 
   <main class="terminal">
     <div id="auth-screen" class="window">
@@ -113,6 +114,32 @@
         </div>
 
         <div id="tab-settings" class="tab-content hidden">
+          <div class="section-header">// görünüm</div>
+          <div class="theme-options" role="radiogroup" aria-label="Tema seç">
+            <label class="theme-option">
+              <span class="theme-preview theme-preview-terminal" aria-hidden="true">
+                <span class="theme-preview-bar"></span>
+                <span class="theme-preview-line"></span>
+                <span class="theme-preview-line short"></span>
+              </span>
+              <span class="theme-option-head">
+                <input type="radio" name="theme-select" value="terminal" />
+                <span class="theme-option-name">Terminal</span>
+              </span>
+            </label>
+            <label class="theme-option">
+              <span class="theme-preview theme-preview-newsprint" aria-hidden="true">
+                <span class="theme-preview-bar"></span>
+                <span class="theme-preview-line"></span>
+                <span class="theme-preview-line short"></span>
+              </span>
+              <span class="theme-option-head">
+                <input type="radio" name="theme-select" value="newsprint" />
+                <span class="theme-option-name">Gazete</span>
+              </span>
+            </label>
+          </div>
+
           <div class="section-header">// mikrofon</div>
           <label class="field">
             <span class="prompt">in:~$</span>
