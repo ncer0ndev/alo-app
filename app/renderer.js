@@ -1103,6 +1103,15 @@ function renderParticipants() {
     };
 
     li.append(profileAvatars.image(name), nameSpan, vol, muteOneBtn);
+
+    if (currentRoomIsOwner && currentRoomType !== 'call') {
+      const kickBtn = document.createElement('button');
+      kickBtn.className = 'btn btn-ghost';
+      kickBtn.textContent = '[ AT ]';
+      kickBtn.onclick = () => kickParticipant(id, name);
+      li.append(kickBtn);
+    }
+
     participantsList.appendChild(li);
   }
 }
@@ -1125,6 +1134,20 @@ function muteAllIncoming() {
       btn.textContent = shouldMute ? '[ SESİ AÇ ]' : '[ SUSTUR ]';
     }
   });
+}
+
+async function kickParticipant(targetSocketId, targetName) {
+  if (!currentRoomIsOwner || !socket) return;
+  const ack = await emitWithTimeout('kick-participant', { targetSocketId });
+  if (!ack || ack.error) {
+    showToast(ack?.error || `${targetName} atılamadı`, 'error');
+    return;
+  }
+  // Sunucu, atilan disindaki odadakilere 'peer-left' yayinlar (gonderen
+  // haric); atan (biz) bu yayini kendimize almadigimizdan katilimciyi
+  // burada elle temizliyoruz.
+  cleanupPeer(targetSocketId);
+  showToast(`${targetName} odadan atıldı`, 'ok', 3000);
 }
 
 // ---- sohbet ----
@@ -1807,6 +1830,13 @@ function connectSocket() {
     if (currentRoomType === 'call' && currentRoomCode) {
       leaveRoom();
       showToast('Karşı taraf görüşmeden ayrıldı.', 'info');
+    }
+  });
+
+  socket.on('kicked-from-room', ({ roomCode } = {}) => {
+    if (currentRoomCode && currentRoomCode === roomCode) {
+      leaveRoom();
+      showToast('Oda sahibi tarafından odadan çıkarıldın.', 'error');
     }
   });
 

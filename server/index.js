@@ -672,7 +672,7 @@ io.on('connection', (socket) => {
     const { to, data } = payload || {};
     if (!currentRoom) return;
     const room = rooms.get(currentRoom);
-    if (!room || typeof to !== 'string' || !room.members.has(to)) return;
+    if (!room || !room.members.has(socket.id) || typeof to !== 'string' || !room.members.has(to)) return;
     if (!isValidSignalData(data)) return;
     io.to(to).emit('signal', { from: socket.id, data });
   });
@@ -681,7 +681,7 @@ io.on('connection', (socket) => {
     if (typeof ack !== 'function') ack = () => {};
     if (!currentRoom) return ack({ error: 'bir odada degilsin' });
     const room = rooms.get(currentRoom);
-    if (!room) return ack({ error: 'oda bulunamadi' });
+    if (!room || !room.members.has(socket.id)) return ack({ error: 'oda bulunamadi' });
 
     const { text, clientMessageId } = payload || {};
     if (typeof clientMessageId !== 'string' || clientMessageId.length === 0 || clientMessageId.length > 64) {
@@ -712,6 +712,38 @@ io.on('connection', (socket) => {
 
     socket.to(currentRoom).emit('chat-message', message);
     ack({ ok: true, message });
+  });
+
+  socket.on('kick-participant', (payload, ack) => {
+    if (typeof ack !== 'function') ack = () => {};
+    if (!currentRoom) return ack({ error: 'bir odada degilsin' });
+    const room = rooms.get(currentRoom);
+    if (!room || room.type !== 'room' || room.ownerUserId !== userId) {
+      return ack({ error: 'sadece oda sahibi birini atabilir' });
+    }
+
+    const { targetSocketId } = payload || {};
+    if (typeof targetSocketId !== 'string' || targetSocketId.length === 0) {
+      return ack({ error: 'gecersiz istek' });
+    }
+    if (targetSocketId === socket.id) return ack({ error: 'kendini atamazsin' });
+    if (!room.members.has(targetSocketId)) return ack({ error: 'kullanici bu odada degil' });
+
+    // Uyelik kaydini hemen kaldiriyoruz ki (a) sayimlar/durum tutarli kalsin
+    // ve (b) atilan kullanici kendi 'leave-room' cagrisini hic yapmasa bile
+    // (degistirilmis/isbirligi yapmayan bir istemci) diger herkes ona olan
+    // WebRTC baglantisini derhal kapatsin - ses P2P aktigi icin asil
+    // yaptirim budur, atilan tarafin kendi istemcisine guvenilmez.
+    room.members.delete(targetSocketId);
+    socket.to(currentRoom).emit('peer-left', { id: targetSocketId });
+
+    const targetSocket = io.sockets.sockets.get(targetSocketId);
+    if (targetSocket) {
+      targetSocket.leave(currentRoom);
+      targetSocket.emit('kicked-from-room', { roomCode: currentRoom });
+    }
+
+    ack({ ok: true });
   });
 
   socket.on('dm-message', (payload, ack) => {
