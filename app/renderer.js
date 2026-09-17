@@ -1,8 +1,7 @@
-const { io } = require('socket.io-client');
-const { clipboard, ipcRenderer } = require('electron');
-
-const ICE_SERVERS = [{ urls: 'stun:stun.l.google.com:19302' }];
+/* global io */
 const SERVER_URL = 'https://alo-app.onrender.com';
+const DEFAULT_ICE_SERVERS = [{ urls: 'stun:stun.l.google.com:19302' }];
+const CALL_COOLDOWN_MS = 3000;
 
 const authScreen = document.getElementById('auth-screen');
 const joinScreen = document.getElementById('join-screen');
@@ -32,6 +31,8 @@ const addFriendBtn = document.getElementById('add-friend-btn');
 const friendStatusEl = document.getElementById('friend-status');
 const incomingRequestsSection = document.getElementById('incoming-requests-section');
 const incomingRequestsList = document.getElementById('incoming-requests');
+const outgoingRequestsSection = document.getElementById('outgoing-requests-section');
+const outgoingRequestsList = document.getElementById('outgoing-requests');
 const friendsListEl = document.getElementById('friends-list');
 const friendsEmptyEl = document.getElementById('friends-empty');
 
@@ -40,8 +41,20 @@ const incomingCallText = document.getElementById('incoming-call-text');
 const acceptCallBtn = document.getElementById('accept-call-btn');
 const declineCallBtn = document.getElementById('decline-call-btn');
 
+const outgoingCallBanner = document.getElementById('outgoing-call-banner');
+const outgoingCallText = document.getElementById('outgoing-call-text');
+const cancelCallBtn = document.getElementById('cancel-call-btn');
+
+const activeCallBar = document.getElementById('active-call-bar');
+const activeCallText = document.getElementById('active-call-text');
+const returnToCallBtn = document.getElementById('return-to-call-btn');
+
+const toastEl = document.getElementById('toast');
+
 const muteBtn = document.getElementById('mute-btn');
 const leaveBtn = document.getElementById('leave-btn');
+const roomSettingsBtn = document.getElementById('room-settings-btn');
+const muteAllBtn = document.getElementById('mute-all-btn');
 const participantsList = document.getElementById('participants');
 const micIndicator = document.getElementById('mic-indicator');
 
@@ -53,24 +66,45 @@ const vadSensitivitySlider = document.getElementById('vad-sensitivity');
 const pttSettingsSection = document.getElementById('ptt-settings');
 const pttKeySelect = document.getElementById('ptt-key-select');
 const pttKeyStatusEl = document.getElementById('ptt-key-status');
+const micLevelBar = document.getElementById('mic-level-bar');
+const micTestBtn = document.getElementById('mic-test-btn');
 
-const PTT_KEY_OPTIONS = [
-  'Space', 'Insert', 'Home', 'End', 'PageUp', 'PageDown',
-  'F1', 'F2', 'F3', 'F4', 'F5', 'F6', 'F7', 'F8', 'F9', 'F10', 'F11', 'F12',
-  'Num0', 'Num1', 'Num2', 'Num3', 'Num4', 'Num5', 'Num6', 'Num7', 'Num8', 'Num9',
-];
+const PTT_KEY_OPTIONS = window.api?.pttKeyOptions || ['Space'];
 
 let socket = null;
 let localStream = null;
 let muted = false;
+let iceServers = DEFAULT_ICE_SERVERS;
 let pendingIncomingCall = null;
+let currentOutgoingCall = null;
 let currentRoomCode = null;
+let joining = false;
+let lastCallAttemptAt = 0;
 let audioContext = null;
 let vadRafId = null;
 let vadLastActiveTime = 0;
+let speakingRafId = null;
+let levelMeterCtx = null;
+let levelMeterRafId = null;
+let levelMeterTempStream = null;
+
 const peerConnections = {};
 const audioElements = {};
 const participantNames = {};
+const pendingCandidates = {};
+const peerAnalysers = {};
+
+// ---- yardimci: bildirim / durum satirlari ----
+
+function showToast(text, kind = 'info', durationMs = 4000) {
+  toastEl.textContent = `[${kind.toUpperCase()}] ${text}`;
+  toastEl.className = `toast ${kind}`;
+  toastEl.classList.remove('hidden');
+  if (toastEl._timeout) clearTimeout(toastEl._timeout);
+  if (durationMs > 0) {
+    toastEl._timeout = setTimeout(() => toastEl.classList.add('hidden'), durationMs);
+  }
+}
 
 function setStatus(text, kind = 'info') {
   statusEl.textContent = text ? `[${kind.toUpperCase()}] ${text}` : '';
@@ -91,24 +125,7 @@ function getServerUrl() {
   return SERVER_URL;
 }
 
-function getSettings() {
-  return {
-    micMode: localStorage.getItem('micMode') || 'always',
-    pttKey: localStorage.getItem('pttKey') || 'Space',
-    vadSensitivity: Number(localStorage.getItem('vadSensitivity') || '50'),
-    micDeviceId: localStorage.getItem('micDeviceId') || '',
-    speakerDeviceId: localStorage.getItem('speakerDeviceId') || '',
-  };
-}
-
-function saveSetting(key, value) {
-  localStorage.setItem(key, value);
-}
-
-function showScreen(screen) {
-  [authScreen, joinScreen, roomScreen].forEach((s) => s.classList.add('hidden'));
-  screen.classList.remove('hidden');
-}
+// ---- oturum / ayarlar depolama ----
 
 function getSession() {
   try {
@@ -131,6 +148,34 @@ function clearSession() {
   localStorage.removeItem('username');
 }
 
+function getSettings() {
+  return {
+    micMode: localStorage.getItem('micMode') || 'always',
+    pttKey: localStorage.getItem('pttKey') || 'Space',
+    vadSensitivity: Number(localStorage.getItem('vadSensitivity') || '50'),
+    micDeviceId: localStorage.getItem('micDeviceId') || '',
+    speakerDeviceId: localStorage.getItem('speakerDeviceId') || '',
+  };
+}
+
+function saveSetting(key, value) {
+  localStorage.setItem(key, value);
+}
+
+function showScreen(screen) {
+  [authScreen, joinScreen, roomScreen].forEach((s) => s.classList.add('hidden'));
+  screen.classList.remove('hidden');
+  updateActiveCallBar();
+}
+
+function updateActiveCallBar() {
+  const inRoomScreen = !roomScreen.classList.contains('hidden');
+  activeCallBar.classList.toggle('hidden', !currentRoomCode || inRoomScreen);
+  if (currentRoomCode) activeCallText.textContent = `GÖRÜŞME DEVAM EDİYOR (${currentRoomCode})`;
+}
+
+// ---- kimlik dogrulama ----
+
 async function authRequest(endpoint) {
   const username = authUsernameInput.value.trim();
   const password = authPasswordInput.value;
@@ -139,7 +184,7 @@ async function authRequest(endpoint) {
     return;
   }
 
-  setAuthStatus('baglaniliyor...', 'info');
+  setAuthStatus('bağlanılıyor...', 'info');
   try {
     const res = await fetch(`${getServerUrl()}${endpoint}`, {
       method: 'POST',
@@ -148,30 +193,68 @@ async function authRequest(endpoint) {
     });
     const data = await res.json();
     if (!res.ok) {
-      setAuthStatus(data.error || 'bir hata olustu', 'error');
+      setAuthStatus(data.error || 'bir hata oluştu', 'error');
       return;
     }
     saveSession(data.token, data.username);
     enterJoinScreen(data.username);
   } catch (err) {
-    setAuthStatus('sunucuya ulasilamadi: ' + err.message, 'error');
+    setAuthStatus('sunucuya ulaşılamadı: ' + err.message, 'error');
   }
 }
 
 function enterJoinScreen(username) {
   setAuthStatus('');
-  welcomeText.textContent = `[OK] oturum acildi: ${username}`;
-  profileUsernameEl.textContent = `kullanici: ${username}`;
+  welcomeText.textContent = `[OK] oturum açıldı: ${username}`;
+  profileUsernameEl.textContent = `kullanıcı: ${username}`;
   showTab('friends');
   showScreen(joinScreen);
   connectSocket();
+  fetchIceServers();
 }
+
+function logout() {
+  fullyLeaveRoom();
+  if (window.api) window.api.unregisterPttShortcut();
+  if (socket) {
+    socket.disconnect();
+    socket = null;
+  }
+  clearSession();
+  authUsernameInput.value = '';
+  authPasswordInput.value = '';
+  incomingCallBanner.classList.add('hidden');
+  outgoingCallBanner.classList.add('hidden');
+  showScreen(authScreen);
+}
+
+// ---- sekmeler ----
 
 function showTab(tabName) {
   tabBtns.forEach((btn) => btn.classList.toggle('active', btn.dataset.tab === tabName));
   tabContents.forEach((content) => content.classList.toggle('hidden', content.id !== `tab-${tabName}`));
   if (tabName === 'settings') initSettingsTab();
 }
+
+// ---- TURN/ICE yapilandirmasi ----
+
+async function fetchIceServers() {
+  try {
+    const { token } = getSession();
+    const res = await fetch(`${getServerUrl()}/api/ice-servers`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    if (!res.ok) return;
+    const data = await res.json();
+    if (Array.isArray(data.iceServers) && data.iceServers.length > 0) {
+      iceServers = data.iceServers;
+    }
+  } catch {
+    // varsayilan STUN ile devam edilir
+  }
+}
+
+// ---- ayarlar sekmesi ----
 
 function updateModeVisibility() {
   const mode = getSettings().micMode;
@@ -229,18 +312,107 @@ async function populateDeviceLists() {
   speakers.forEach((d, i) => {
     const opt = document.createElement('option');
     opt.value = d.deviceId;
-    opt.textContent = d.label || `hoparlor ${i + 1}`;
+    opt.textContent = d.label || `hoparlör ${i + 1}`;
     speakerSelect.appendChild(opt);
   });
   if (settings.speakerDeviceId) speakerSelect.value = settings.speakerDeviceId;
 }
 
-function setMicEnabled(enabled) {
+async function switchMicDevice(deviceId) {
+  try {
+    const newStream = await navigator.mediaDevices.getUserMedia({
+      audio: deviceId ? { deviceId: { exact: deviceId } } : true,
+    });
+    const newTrack = newStream.getAudioTracks()[0];
+    for (const pc of Object.values(peerConnections)) {
+      const sender = pc.getSenders().find((s) => s.track && s.track.kind === 'audio');
+      if (sender) await sender.replaceTrack(newTrack);
+    }
+    if (localStream) localStream.getTracks().forEach((t) => t.stop());
+    localStream = newStream;
+    applyMicMode();
+    showToast('mikrofon değiştirildi', 'ok', 2500);
+  } catch (err) {
+    showToast('mikrofon değiştirilemedi: ' + err.message, 'error');
+  }
+}
+
+// ---- mikrofon seviye testi (canli gorusmeden bagimsiz) ----
+
+function stopLevelMeter() {
+  if (levelMeterRafId) cancelAnimationFrame(levelMeterRafId);
+  levelMeterRafId = null;
+  if (levelMeterCtx) {
+    levelMeterCtx.close();
+    levelMeterCtx = null;
+  }
+  if (levelMeterTempStream) {
+    levelMeterTempStream.getTracks().forEach((t) => t.stop());
+    levelMeterTempStream = null;
+  }
+  micLevelBar.style.width = '0%';
+  micTestBtn.textContent = '[ MİKROFONU TEST ET ]';
+}
+
+async function toggleLevelMeter() {
+  if (levelMeterRafId) {
+    stopLevelMeter();
+    return;
+  }
+
+  let stream = localStream;
+  if (!stream) {
+    const settings = getSettings();
+    try {
+      stream = await navigator.mediaDevices.getUserMedia({
+        audio: settings.micDeviceId ? { deviceId: { exact: settings.micDeviceId } } : true,
+      });
+    } catch (err) {
+      showToast('mikrofon test edilemedi: ' + err.message, 'error');
+      return;
+    }
+    levelMeterTempStream = stream;
+  }
+
+  levelMeterCtx = new AudioContext();
+  const source = levelMeterCtx.createMediaStreamSource(stream);
+  const analyser = levelMeterCtx.createAnalyser();
+  analyser.fftSize = 512;
+  source.connect(analyser);
+  const data = new Uint8Array(analyser.frequencyBinCount);
+  micTestBtn.textContent = '[ TESTİ DURDUR ]';
+
+  function loop() {
+    analyser.getByteTimeDomainData(data);
+    let sum = 0;
+    for (let i = 0; i < data.length; i++) {
+      const v = (data[i] - 128) / 128;
+      sum += v * v;
+    }
+    const level = Math.sqrt(sum / data.length);
+    micLevelBar.style.width = `${Math.min(100, level * 300)}%`;
+    levelMeterRafId = requestAnimationFrame(loop);
+  }
+  loop();
+}
+
+// ---- mikrofon modu: her zaman acik / sesle aktif / bas konus ----
+// onemli: analiz akisi (VAD) hicbir zaman kapatilmaz; sadece disariya giden
+// ses (track.enabled) kontrol edilir. Manuel susturma ayri bir katmandir ve
+// otomatik kapida (VAD/PTT) her zaman ustundur.
+
+function isEffectivelyMuted() {
+  return muted;
+}
+
+function applyTrackEnabledState(autoGateOpen) {
   if (!localStream) return;
+  const enabled = !isEffectivelyMuted() && autoGateOpen;
   localStream.getAudioTracks().forEach((t) => (t.enabled = enabled));
-  if (getSettings().micMode !== 'always') {
-    micIndicator.textContent = enabled ? '[ MIC ACIK ]' : '[ MIC KAPALI ]';
-    micIndicator.className = `status-line ${enabled ? 'ok' : ''}`;
+  const mode = getSettings().micMode;
+  if (mode !== 'always') {
+    micIndicator.textContent = muted ? '[ SUSTURULDU ]' : enabled ? '[ MİK AÇIK ]' : '[ MİK KAPALI ]';
+    micIndicator.className = `status-line ${muted ? 'error' : enabled ? 'ok' : ''}`;
   }
 }
 
@@ -256,6 +428,7 @@ function stopVoiceActivation() {
 }
 
 function startVoiceActivation() {
+  if (!localStream) return;
   audioContext = new AudioContext();
   const source = audioContext.createMediaStreamSource(localStream);
   const analyser = audioContext.createAnalyser();
@@ -276,69 +449,69 @@ function startVoiceActivation() {
 
     const now = performance.now();
     if (level > threshold) vadLastActiveTime = now;
-    setMicEnabled(now - vadLastActiveTime < 300);
+    applyTrackEnabledState(now - vadLastActiveTime < 300);
 
     vadRafId = requestAnimationFrame(loop);
   }
   loop();
 }
 
-function updatePttConfig() {
+let pttToggleState = false;
+
+function updatePttRegistration() {
+  if (!window.api) return;
   const settings = getSettings();
   if (settings.micMode === 'ptt' && localStream) {
-    ipcRenderer.send('register-ptt-shortcut', { key: settings.pttKey });
+    window.api.registerPttShortcut(settings.pttKey);
   } else {
-    ipcRenderer.send('unregister-ptt-shortcut');
+    window.api.unregisterPttShortcut();
   }
 }
 
 function applyMicMode() {
   stopVoiceActivation();
-  muted = false;
   const mode = getSettings().micMode;
+  muteBtn.classList.remove('hidden');
+  muteBtn.textContent = muted ? '[ MİKROFONU AÇ ]' : '[ MİKROFONU KAPAT ]';
 
   if (mode === 'always') {
-    muteBtn.classList.remove('hidden');
     micIndicator.classList.add('hidden');
-    setMicEnabled(true);
+    applyTrackEnabledState(true);
   } else if (mode === 'ptt') {
-    muteBtn.classList.add('hidden');
     micIndicator.classList.remove('hidden');
-    setMicEnabled(false);
+    pttToggleState = false;
+    applyTrackEnabledState(false);
   } else if (mode === 'voice') {
-    muteBtn.classList.add('hidden');
     micIndicator.classList.remove('hidden');
     startVoiceActivation();
   }
 
-  updatePttConfig();
+  updatePttRegistration();
 }
 
-function generateRoomCode() {
-  return Math.random().toString(36).slice(2, 8).toUpperCase();
+function toggleMute() {
+  if (!localStream) return;
+  muted = !muted;
+  muteBtn.textContent = muted ? '[ MİKROFONU AÇ ]' : '[ MİKROFONU KAPAT ]';
+  const mode = getSettings().micMode;
+  if (mode === 'always') {
+    applyTrackEnabledState(true);
+  } else if (mode === 'ptt') {
+    applyTrackEnabledState(pttToggleState);
+  }
+  // sesle aktif modda VAD dongusu zaten her karede applyTrackEnabledState cagirir,
+  // muted durumu orada da dikkate alinir.
 }
 
-function createRoom() {
-  joinRoomWithCode(generateRoomCode());
-}
+// ---- oda kodu / pano ----
 
 function copyRoomCode() {
   if (!currentRoomCode) return;
-  clipboard.writeText(currentRoomCode);
-  setStatus('oda kodu panoya kopyalandi', 'ok');
+  if (window.api) window.api.copyToClipboard(currentRoomCode);
+  showToast('oda kodu panoya kopyalandı', 'ok', 2500);
 }
 
-function logout() {
-  if (socket) {
-    socket.disconnect();
-    socket = null;
-  }
-  clearSession();
-  authUsernameInput.value = '';
-  authPasswordInput.value = '';
-  incomingCallBanner.classList.add('hidden');
-  showScreen(authScreen);
-}
+// ---- arkadaslar ----
 
 async function apiRequest(endpoint, body) {
   const { token } = getSession();
@@ -351,7 +524,7 @@ async function apiRequest(endpoint, body) {
     body: JSON.stringify(body || {}),
   });
   const data = await res.json();
-  if (!res.ok) throw new Error(data.error || 'bir hata olustu');
+  if (!res.ok) throw new Error(data.error || 'bir hata oluştu');
   return data;
 }
 
@@ -363,34 +536,47 @@ async function loadFriends() {
     });
     const data = await res.json();
     if (!res.ok) return;
-    renderFriends(data.friends, data.incoming);
+    renderFriends(data.friends, data.incoming, data.outgoing);
   } catch {
     // sessizce yoksay, bir sonraki denemede tekrar dener
   }
 }
 
-function renderFriends(friends, incoming) {
+function renderFriends(friends, incoming, outgoing) {
   incomingRequestsList.innerHTML = '';
-  if (incoming.length === 0) {
-    incomingRequestsSection.classList.add('hidden');
-  } else {
-    incomingRequestsSection.classList.remove('hidden');
-    for (const name of incoming) {
-      const li = document.createElement('li');
-      li.className = 'friend-row';
-      li.innerHTML = `<span class="name">${escapeHtml(name)}</span>`;
-      const acceptBtn = document.createElement('button');
-      acceptBtn.className = 'btn';
-      acceptBtn.textContent = '[ KABUL ]';
-      acceptBtn.onclick = () => respondToRequest(name, true);
-      const declineBtn = document.createElement('button');
-      declineBtn.className = 'btn btn-ghost';
-      declineBtn.textContent = '[ RED ]';
-      declineBtn.onclick = () => respondToRequest(name, false);
-      li.appendChild(acceptBtn);
-      li.appendChild(declineBtn);
-      incomingRequestsList.appendChild(li);
-    }
+  incomingRequestsSection.classList.toggle('hidden', incoming.length === 0);
+  for (const name of incoming) {
+    const li = document.createElement('li');
+    li.className = 'friend-row';
+    const nameSpan = document.createElement('span');
+    nameSpan.className = 'name';
+    nameSpan.textContent = name;
+    const acceptBtn = document.createElement('button');
+    acceptBtn.className = 'btn';
+    acceptBtn.textContent = '[ KABUL ]';
+    acceptBtn.onclick = () => respondToRequest(name, true);
+    const declineBtn = document.createElement('button');
+    declineBtn.className = 'btn btn-ghost';
+    declineBtn.textContent = '[ RED ]';
+    declineBtn.onclick = () => respondToRequest(name, false);
+    li.append(nameSpan, acceptBtn, declineBtn);
+    incomingRequestsList.appendChild(li);
+  }
+
+  outgoingRequestsList.innerHTML = '';
+  outgoingRequestsSection.classList.toggle('hidden', outgoing.length === 0);
+  for (const name of outgoing) {
+    const li = document.createElement('li');
+    li.className = 'friend-row';
+    const nameSpan = document.createElement('span');
+    nameSpan.className = 'name';
+    nameSpan.textContent = `${name} (bekleniyor)`;
+    const cancelBtn = document.createElement('button');
+    cancelBtn.className = 'btn btn-ghost';
+    cancelBtn.textContent = '[ İPTAL ]';
+    cancelBtn.onclick = () => cancelOutgoingRequest(name);
+    li.append(nameSpan, cancelBtn);
+    outgoingRequestsList.appendChild(li);
   }
 
   friendsListEl.innerHTML = '';
@@ -405,21 +591,17 @@ function renderFriends(friends, incoming) {
     name.className = 'name';
     name.textContent = friend.username;
     const callBtn = document.createElement('button');
-    callBtn.className = 'btn';
+    callBtn.className = 'btn call-btn';
     callBtn.textContent = '[ ARA ]';
-    callBtn.disabled = !friend.online;
+    callBtn.disabled = !friend.online || !!currentOutgoingCall;
     callBtn.onclick = () => callFriend(friend.username);
-    li.appendChild(dot);
-    li.appendChild(name);
-    li.appendChild(callBtn);
+    const removeBtn = document.createElement('button');
+    removeBtn.className = 'btn btn-ghost';
+    removeBtn.textContent = '[ SİL ]';
+    removeBtn.onclick = () => removeFriend(friend.username);
+    li.append(dot, name, callBtn, removeBtn);
     friendsListEl.appendChild(li);
   }
-}
-
-function escapeHtml(text) {
-  const div = document.createElement('div');
-  div.textContent = text;
-  return div.innerHTML;
 }
 
 async function respondToRequest(fromUsername, accepted) {
@@ -431,27 +613,63 @@ async function respondToRequest(fromUsername, accepted) {
   }
 }
 
-async function addFriend() {
-  const username = addFriendInput.value.trim();
-  if (!username) return;
+async function cancelOutgoingRequest(targetUsername) {
   try {
-    await apiRequest('/api/friends/request', { username });
-    setFriendStatus(`istek gonderildi: ${username}`, 'ok');
-    addFriendInput.value = '';
+    await apiRequest('/api/friends/cancel', { username: targetUsername });
+    loadFriends();
   } catch (err) {
     setFriendStatus(err.message, 'error');
   }
 }
 
+async function removeFriend(targetUsername) {
+  try {
+    await apiRequest('/api/friends/remove', { username: targetUsername });
+    loadFriends();
+  } catch (err) {
+    setFriendStatus(err.message, 'error');
+  }
+}
+
+async function addFriend() {
+  const username = addFriendInput.value.trim();
+  if (!username) return;
+  try {
+    await apiRequest('/api/friends/request', { username });
+    setFriendStatus(`istek gönderildi: ${username}`, 'ok');
+    addFriendInput.value = '';
+    loadFriends();
+  } catch (err) {
+    setFriendStatus(err.message, 'error');
+  }
+}
+
+function setCallButtonsEnabled(enabled) {
+  document.querySelectorAll('.call-btn').forEach((btn) => {
+    if (enabled) {
+      const row = btn.closest('.friend-row');
+      const isOnline = row?.querySelector('.dot')?.classList.contains('online');
+      btn.disabled = !isOnline;
+    } else {
+      btn.disabled = true;
+    }
+  });
+}
+
 function callFriend(toUsername) {
-  if (!socket) return;
-  setStatus(`${toUsername} araniyor...`, 'info');
-  socket.emit('call-friend', { toUsername });
+  if (!socket || currentOutgoingCall) return;
+  const now = Date.now();
+  if (now - lastCallAttemptAt < CALL_COOLDOWN_MS) return;
+  lastCallAttemptAt = now;
+
+  socket.emit('call-friend', { toUsername }, (ack) => {
+    if (ack && ack.error) showToast(ack.error, 'error');
+  });
 }
 
 function showIncomingCall(fromUsername, roomCode) {
   pendingIncomingCall = { fromUsername, roomCode };
-  incomingCallText.textContent = `${fromUsername} seni ariyor`;
+  incomingCallText.textContent = `${fromUsername} seni arıyor`;
   incomingCallBanner.classList.remove('hidden');
 }
 
@@ -460,105 +678,27 @@ function hideIncomingCall() {
   incomingCallBanner.classList.add('hidden');
 }
 
-function connectSocket() {
-  const { token } = getSession();
-  socket = io(getServerUrl());
-
-  socket.on('connect', () => {
-    socket.emit('authenticate', token);
-  });
-
-  socket.on('authenticated', () => {
-    loadFriends();
-  });
-
-  socket.on('auth-error', () => {
-    logout();
-  });
-
-  socket.on('friend-online', ({ username }) => setFriendOnline(username, true));
-  socket.on('friend-offline', ({ username }) => setFriendOnline(username, false));
-  socket.on('friend-request', () => loadFriends());
-  socket.on('friend-accepted', () => loadFriends());
-
-  socket.on('incoming-call', ({ fromUsername, roomCode }) => showIncomingCall(fromUsername, roomCode));
-
-  socket.on('call-ringing', () => setStatus('araniyor, bekleniyor...', 'info'));
-
-  socket.on('call-failed', ({ toUsername, reason }) => {
-    const reasonText = reason === 'offline' ? 'cevrimdisi' : 'artik arkadas degilsiniz';
-    setStatus(`${toUsername} aranamadi: ${reasonText}`, 'error');
-  });
-
-  socket.on('call-accepted', ({ roomCode }) => {
-    setStatus('');
-    joinRoomWithCode(roomCode);
-  });
-
-  socket.on('call-declined', ({ byUsername }) => {
-    setStatus(`${byUsername} aramayi reddetti`, 'error');
-  });
-
-  socket.on('join-error', ({ error }) => {
-    setStatus(error, 'error');
-  });
-
-  socket.on('existing-peers', async (peers) => {
-    for (const peer of peers) {
-      addParticipant(peer.id, peer.displayName);
-      await callPeer(peer.id);
-    }
-  });
-
-  socket.on('peer-joined', ({ id, displayName }) => {
-    addParticipant(id, displayName);
-  });
-
-  socket.on('signal', handleSignal);
-
-  socket.on('peer-left', ({ id }) => {
-    cleanupPeer(id);
-  });
-
-  socket.on('connect_error', (err) => {
-    setStatus('baglanti hatasi: ' + err.message, 'error');
-  });
+function showOutgoingCall(toUsername, roomCode) {
+  currentOutgoingCall = { toUsername, roomCode };
+  outgoingCallText.textContent = `${toUsername} aranıyor...`;
+  outgoingCallBanner.classList.remove('hidden');
+  setCallButtonsEnabled(false);
 }
 
-function setFriendOnline(username, online) {
-  const row = friendsListEl.querySelector(`[data-username="${username.toLowerCase()}"]`);
-  if (!row) return;
-  row.querySelector('.dot').classList.toggle('online', online);
-  row.querySelector('.btn').disabled = !online;
+function hideOutgoingCall() {
+  currentOutgoingCall = null;
+  outgoingCallBanner.classList.add('hidden');
+  setCallButtonsEnabled(true);
 }
 
-function renderParticipants(myUsername) {
-  participantsList.innerHTML = '';
-  const me = document.createElement('li');
-  me.textContent = `${myUsername} (sen)`;
-  me.style.color = 'var(--secondary)';
-  participantsList.appendChild(me);
-  for (const name of Object.values(participantNames)) {
-    const li = document.createElement('li');
-    li.textContent = name;
-    participantsList.appendChild(li);
-  }
-}
-
-function addParticipant(id, name) {
-  participantNames[id] = name;
-  renderParticipants(getSession().username);
-}
-
-function removeParticipant(id) {
-  delete participantNames[id];
-  renderParticipants(getSession().username);
-}
+// ---- WebRTC eslesme ----
 
 function createPeerConnection(peerId) {
-  const pc = new RTCPeerConnection({ iceServers: ICE_SERVERS });
+  const pc = new RTCPeerConnection({ iceServers });
 
-  localStream.getTracks().forEach((track) => pc.addTrack(track, localStream));
+  if (localStream) {
+    localStream.getTracks().forEach((track) => pc.addTrack(track, localStream));
+  }
 
   pc.onicecandidate = (event) => {
     if (event.candidate) {
@@ -579,6 +719,17 @@ function createPeerConnection(peerId) {
     if (speakerId && audio.setSinkId) {
       audio.setSinkId(speakerId).catch(() => {});
     }
+    setupSpeakingDetector(peerId, event.streams[0]);
+  };
+
+  pc.onconnectionstatechange = () => {
+    if (pc.connectionState === 'failed') {
+      try {
+        pc.restartIce();
+      } catch {
+        // restartIce desteklenmiyorsa sessizce yoksay
+      }
+    }
   };
 
   peerConnections[peerId] = pc;
@@ -592,21 +743,95 @@ async function callPeer(peerId) {
   socket.emit('signal', { to: peerId, data: { sdp: pc.localDescription } });
 }
 
-async function handleSignal({ from, data }) {
-  let pc = peerConnections[from];
-
-  if (data.sdp) {
-    if (data.sdp.type === 'offer') {
-      pc = pc || createPeerConnection(from);
-      await pc.setRemoteDescription(new RTCSessionDescription(data.sdp));
-      const answer = await pc.createAnswer();
-      await pc.setLocalDescription(answer);
-      socket.emit('signal', { to: from, data: { sdp: pc.localDescription } });
-    } else if (data.sdp.type === 'answer') {
-      await pc.setRemoteDescription(new RTCSessionDescription(data.sdp));
+async function flushPendingCandidates(peerId) {
+  const queued = pendingCandidates[peerId];
+  if (!queued || queued.length === 0) return;
+  delete pendingCandidates[peerId];
+  const pc = peerConnections[peerId];
+  if (!pc) return;
+  for (const candidate of queued) {
+    try {
+      await pc.addIceCandidate(new RTCIceCandidate(candidate));
+    } catch (err) {
+      console.error('ICE aday eklenemedi', err);
     }
-  } else if (data.candidate && pc) {
-    await pc.addIceCandidate(new RTCIceCandidate(data.candidate));
+  }
+}
+
+async function handleSignal({ from, data }) {
+  try {
+    let pc = peerConnections[from];
+
+    if (data.sdp) {
+      if (data.sdp.type === 'offer') {
+        pc = pc || createPeerConnection(from);
+        await pc.setRemoteDescription(new RTCSessionDescription(data.sdp));
+        await flushPendingCandidates(from);
+        const answer = await pc.createAnswer();
+        await pc.setLocalDescription(answer);
+        socket.emit('signal', { to: from, data: { sdp: pc.localDescription } });
+      } else if (data.sdp.type === 'answer' && pc) {
+        await pc.setRemoteDescription(new RTCSessionDescription(data.sdp));
+        await flushPendingCandidates(from);
+      }
+    } else if (data.candidate) {
+      if (pc && pc.remoteDescription) {
+        await pc.addIceCandidate(new RTCIceCandidate(data.candidate));
+      } else {
+        (pendingCandidates[from] ||= []).push(data.candidate);
+      }
+    }
+  } catch (err) {
+    console.error('sinyal işleme hatası', err);
+  }
+}
+
+function setupSpeakingDetector(peerId, stream) {
+  teardownSpeakingDetector(peerId);
+  try {
+    const ctx = new AudioContext();
+    const source = ctx.createMediaStreamSource(stream);
+    const analyser = ctx.createAnalyser();
+    analyser.fftSize = 512;
+    source.connect(analyser);
+    peerAnalysers[peerId] = { ctx, analyser, data: new Uint8Array(analyser.frequencyBinCount) };
+    ensureSpeakingLoop();
+  } catch {
+    // ses analiz edilemiyorsa konusma gostergesi olmadan devam et
+  }
+}
+
+function teardownSpeakingDetector(peerId) {
+  const entry = peerAnalysers[peerId];
+  if (entry) {
+    entry.ctx.close().catch(() => {});
+    delete peerAnalysers[peerId];
+  }
+}
+
+function ensureSpeakingLoop() {
+  if (speakingRafId) return;
+  function loop() {
+    for (const [peerId, entry] of Object.entries(peerAnalysers)) {
+      entry.analyser.getByteTimeDomainData(entry.data);
+      let sum = 0;
+      for (let i = 0; i < entry.data.length; i++) {
+        const v = (entry.data[i] - 128) / 128;
+        sum += v * v;
+      }
+      const level = Math.sqrt(sum / entry.data.length);
+      const row = participantsList.querySelector(`[data-peer-id="${peerId}"]`);
+      if (row) row.classList.toggle('speaking', level > 0.06);
+    }
+    speakingRafId = requestAnimationFrame(loop);
+  }
+  loop();
+}
+
+function stopSpeakingLoop() {
+  if (speakingRafId) {
+    cancelAnimationFrame(speakingRafId);
+    speakingRafId = null;
   }
 }
 
@@ -619,31 +844,145 @@ function cleanupPeer(peerId) {
     audioElements[peerId].remove();
     delete audioElements[peerId];
   }
-  removeParticipant(peerId);
+  delete pendingCandidates[peerId];
+  teardownSpeakingDetector(peerId);
+  delete participantNames[peerId];
+  renderParticipants();
 }
 
-async function joinRoomWithCode(roomCode) {
+function cleanupAllPeers() {
+  Object.keys(peerConnections).forEach((id) => cleanupPeer(id));
+  stopSpeakingLoop();
+}
+
+// ---- katilimcilar ----
+
+function renderParticipants() {
+  participantsList.innerHTML = '';
+  const myUsername = getSession().username;
+
+  const me = document.createElement('li');
+  me.className = 'participant-row';
+  me.innerHTML = `<span class="name" style="color: var(--secondary)">${myUsername} (sen)</span>`;
+  participantsList.appendChild(me);
+
+  for (const [id, name] of Object.entries(participantNames)) {
+    const li = document.createElement('li');
+    li.className = 'participant-row';
+    li.dataset.peerId = id;
+
+    const nameSpan = document.createElement('span');
+    nameSpan.className = 'name';
+    nameSpan.textContent = name;
+
+    const vol = document.createElement('input');
+    vol.type = 'range';
+    vol.min = '0';
+    vol.max = '100';
+    vol.value = '100';
+    vol.className = 'volume-slider';
+    vol.setAttribute('aria-label', `${name} ses seviyesi`);
+    vol.oninput = () => {
+      const audio = audioElements[id];
+      if (audio) audio.volume = Number(vol.value) / 100;
+    };
+
+    const muteOneBtn = document.createElement('button');
+    muteOneBtn.className = 'btn btn-ghost';
+    muteOneBtn.textContent = '[ SUSTUR ]';
+    muteOneBtn.onclick = () => {
+      const audio = audioElements[id];
+      if (!audio) return;
+      audio.muted = !audio.muted;
+      muteOneBtn.textContent = audio.muted ? '[ SESİ AÇ ]' : '[ SUSTUR ]';
+    };
+
+    li.append(nameSpan, vol, muteOneBtn);
+    participantsList.appendChild(li);
+  }
+}
+
+function addParticipant(id, name) {
+  participantNames[id] = name;
+  renderParticipants();
+}
+
+function muteAllIncoming() {
+  const shouldMute = muteAllBtn.dataset.state !== 'muted';
+  Object.values(audioElements).forEach((audio) => {
+    audio.muted = shouldMute;
+  });
+  muteAllBtn.dataset.state = shouldMute ? 'muted' : '';
+  muteAllBtn.textContent = shouldMute ? '[ TÜMÜNÜ AÇ ]' : '[ TÜMÜNÜ SUSTUR ]';
+  participantsList.querySelectorAll('.btn-ghost').forEach((btn) => {
+    if (btn.textContent.includes('SUSTUR') || btn.textContent.includes('SESİ AÇ')) {
+      btn.textContent = shouldMute ? '[ SESİ AÇ ]' : '[ SUSTUR ]';
+    }
+  });
+}
+
+// ---- oda / gorusme yasam donguesu ----
+
+async function acquireMicStream() {
   const settings = getSettings();
   try {
-    localStream = await navigator.mediaDevices.getUserMedia({
+    return await navigator.mediaDevices.getUserMedia({
       audio: settings.micDeviceId ? { deviceId: { exact: settings.micDeviceId } } : true,
     });
   } catch (err) {
-    setStatus('mikrofona erisilemedi: ' + err.message, 'error');
-    return;
+    showToast('mikrofona erişilemedi: ' + err.message, 'error');
+    return null;
   }
+}
 
-  socket.emit('join-room', { roomCode });
+function joinRoomAck(roomCode) {
+  return new Promise((resolve) => {
+    socket.emit('join-room', { roomCode }, resolve);
+  });
+}
+
+async function enterRoom(roomCode, stream) {
+  cleanupAllPeers();
+  localStream = stream;
+  muted = false;
+
+  const result = await joinRoomAck(roomCode);
+  if (!result || result.error) {
+    showToast(result?.error || 'odaya katılınamadı', 'error');
+    localStream.getTracks().forEach((t) => t.stop());
+    localStream = null;
+    joining = false;
+    return false;
+  }
 
   currentRoomCode = roomCode;
   roomCodeDisplay.textContent = roomCode;
   showScreen(roomScreen);
-  renderParticipants(getSession().username);
+  renderParticipants();
   applyMicMode();
+
+  for (const peer of result.existingPeers) {
+    addParticipant(peer.id, peer.displayName);
+    await callPeer(peer.id);
+  }
+
+  joining = false;
+  return true;
+}
+
+async function joinRoomWithCode(roomCode) {
+  if (joining) return;
+  joining = true;
+  const stream = await acquireMicStream();
+  if (!stream) {
+    joining = false;
+    return;
+  }
+  await enterRoom(roomCode, stream);
 }
 
 function joinRoom() {
-  const roomCode = roomCodeInput.value.trim();
+  const roomCode = roomCodeInput.value.trim().toUpperCase();
   if (!roomCode) {
     setStatus('oda kodu gerekli', 'error');
     return;
@@ -651,25 +990,170 @@ function joinRoom() {
   joinRoomWithCode(roomCode);
 }
 
-function leaveRoom() {
-  if (socket) socket.emit('leave-room');
-  Object.keys(peerConnections).forEach(cleanupPeer);
-  stopVoiceActivation();
-  if (localStream) localStream.getTracks().forEach((t) => t.stop());
-  localStream = null;
-  currentRoomCode = null;
-  updatePttConfig();
+async function createRoom() {
+  if (joining || !socket) return;
+  joining = true;
+  const ack = await new Promise((resolve) => socket.emit('create-room', resolve));
+  if (!ack || !ack.roomCode) {
+    showToast('oda oluşturulamadı', 'error');
+    joining = false;
+    return;
+  }
+  joining = false;
+  await joinRoomWithCode(ack.roomCode);
+}
 
+function fullyLeaveRoom() {
+  if (socket && currentRoomCode) socket.emit('leave-room');
+  cleanupAllPeers();
+  stopVoiceActivation();
+  if (window.api) window.api.unregisterPttShortcut();
+  if (localStream) {
+    localStream.getTracks().forEach((t) => t.stop());
+    localStream = null;
+  }
+  currentRoomCode = null;
+  updateActiveCallBar();
+}
+
+function leaveRoom() {
+  fullyLeaveRoom();
   showScreen(joinScreen);
   setStatus('');
 }
 
-function toggleMute() {
-  if (!localStream) return;
-  muted = !muted;
-  localStream.getAudioTracks().forEach((track) => (track.enabled = !muted));
-  muteBtn.textContent = muted ? '[ MIKROFONU AC ]' : '[ MIKROFONU KAPAT ]';
+// ---- socket baglantisi ----
+
+function connectSocket() {
+  const { token } = getSession();
+  socket = io(getServerUrl(), {
+    auth: (cb) => cb({ token: getSession().token }),
+    reconnectionDelay: 1000,
+    reconnectionDelayMax: 5000,
+  });
+
+  socket.on('connect', () => {
+    if (currentRoomCode) {
+      showToast('yeniden bağlanıldı, odaya tekrar katılınıyor...', 'ok', 3000);
+      rejoinAfterReconnect();
+    }
+  });
+
+  socket.on('authenticated', () => {
+    loadFriends();
+  });
+
+  socket.on('disconnect', () => {
+    if (currentRoomCode) {
+      showToast('sunucu bağlantısı koptu, yeniden bağlanılıyor...', 'error', 0);
+    }
+  });
+
+  socket.on('connect_error', (err) => {
+    if (err.message === 'unauthorized') {
+      showToast('oturum geçersiz, tekrar giriş yap', 'error');
+      logout();
+      return;
+    }
+    showToast('bağlantı hatası: ' + err.message, 'error', 6000);
+  });
+
+  socket.on('friend-online', ({ username }) => setFriendOnline(username, true));
+  socket.on('friend-offline', ({ username }) => setFriendOnline(username, false));
+  socket.on('friend-request', () => loadFriends());
+  socket.on('friend-accepted', () => loadFriends());
+
+  socket.on('incoming-call', ({ fromUsername, roomCode }) => {
+    if (pendingIncomingCall || currentRoomCode) {
+      socket.emit('call-response', { roomCode, accepted: false });
+      return;
+    }
+    showIncomingCall(fromUsername, roomCode);
+  });
+
+  socket.on('call-ringing', ({ toUsername, roomCode }) => showOutgoingCall(toUsername, roomCode));
+
+  socket.on('call-failed', ({ toUsername, reason }) => {
+    const reasonText = { offline: 'çevrimdışı', 'not-friends': 'artık arkadaş değilsiniz', busy: 'meşgul' }[reason] || reason;
+    showToast(`${toUsername} aranamadı: ${reasonText}`, 'error');
+    hideOutgoingCall();
+  });
+
+  socket.on('call-accepted', ({ roomCode }) => {
+    hideOutgoingCall();
+    joinRoomWithCode(roomCode);
+  });
+
+  socket.on('call-declined', ({ byUsername }) => {
+    showToast(`${byUsername} aramayı reddetti`, 'error');
+    hideOutgoingCall();
+  });
+
+  socket.on('call-timeout', () => {
+    showToast('arama yanıtlanmadı (zaman aşımı)', 'error');
+    hideOutgoingCall();
+  });
+
+  socket.on('call-cancelled', ({ roomCode }) => {
+    if (pendingIncomingCall && pendingIncomingCall.roomCode === roomCode) {
+      showToast(`${pendingIncomingCall.fromUsername} aramayı iptal etti`, 'info');
+      hideIncomingCall();
+    }
+  });
+
+  socket.on('peer-joined', ({ id, displayName }) => {
+    addParticipant(id, displayName);
+  });
+
+  socket.on('signal', handleSignal);
+
+  socket.on('peer-left', ({ id }) => {
+    cleanupPeer(id);
+  });
+
+  if (window.api) {
+    window.api.onPttToggle(() => {
+      if (getSettings().micMode !== 'ptt' || !localStream) return;
+      pttToggleState = !pttToggleState;
+      applyTrackEnabledState(pttToggleState);
+    });
+    window.api.onPttRegisterResult(({ success, key }) => {
+      if (!success) {
+        pttKeyStatusEl.textContent = `[ERROR] ${key} tuşu başka bir uygulama tarafından kullanılıyor, başka tuş seç`;
+        pttKeyStatusEl.className = 'status-line error';
+      } else {
+        pttKeyStatusEl.textContent = '';
+      }
+    });
+  }
 }
+
+async function rejoinAfterReconnect() {
+  const roomCode = currentRoomCode;
+  cleanupAllPeers();
+  const result = await joinRoomAck(roomCode);
+  if (!result || result.error) {
+    showToast('odaya yeniden katılınamadı: ' + (result?.error || ''), 'error', 0);
+    currentRoomCode = null;
+    showScreen(joinScreen);
+    return;
+  }
+  renderParticipants();
+  for (const peer of result.existingPeers) {
+    addParticipant(peer.id, peer.displayName);
+    await callPeer(peer.id);
+  }
+}
+
+function setFriendOnline(username, online) {
+  const row = friendsListEl.querySelector(`[data-username="${username.toLowerCase()}"]`);
+  if (!row) return;
+  row.querySelector('.dot').classList.toggle('online', online);
+  const callBtn = row.querySelector('.call-btn');
+  if (callBtn) callBtn.disabled = !online || !!currentOutgoingCall;
+}
+
+// ---- olay dinleyicileri ----
 
 loginBtn.addEventListener('click', () => authRequest('/api/login'));
 registerBtn.addEventListener('click', () => authRequest('/api/register'));
@@ -680,10 +1164,24 @@ createRoomBtn.addEventListener('click', createRoom);
 copyCodeBtn.addEventListener('click', copyRoomCode);
 leaveBtn.addEventListener('click', leaveRoom);
 muteBtn.addEventListener('click', toggleMute);
+muteAllBtn.addEventListener('click', muteAllIncoming);
+micTestBtn.addEventListener('click', toggleLevelMeter);
+
+roomSettingsBtn.addEventListener('click', () => {
+  showScreen(joinScreen);
+  showTab('settings');
+});
+
+returnToCallBtn.addEventListener('click', () => {
+  showScreen(roomScreen);
+});
 
 tabBtns.forEach((btn) => btn.addEventListener('click', () => showTab(btn.dataset.tab)));
 
-micSelect.addEventListener('change', () => saveSetting('micDeviceId', micSelect.value));
+micSelect.addEventListener('change', async () => {
+  saveSetting('micDeviceId', micSelect.value);
+  if (localStream) await switchMicDevice(micSelect.value);
+});
 
 speakerSelect.addEventListener('change', () => {
   saveSetting('speakerDeviceId', speakerSelect.value);
@@ -707,30 +1205,22 @@ vadSensitivitySlider.addEventListener('input', () => {
 
 pttKeySelect.addEventListener('change', () => {
   saveSetting('pttKey', pttKeySelect.value);
-  updatePttConfig();
+  updatePttRegistration();
 });
 
-ipcRenderer.on('ptt-toggle', () => {
-  if (!localStream) return;
-  const currentlyEnabled = localStream.getAudioTracks()[0]?.enabled;
-  setMicEnabled(!currentlyEnabled);
-});
-
-ipcRenderer.on('ptt-register-result', (_event, { success, key }) => {
-  if (!success) {
-    pttKeyStatusEl.textContent = `[ERROR] ${key} tusu baska bir uygulama tarafindan kullaniliyor, baska tus sec`;
-    pttKeyStatusEl.className = 'status-line error';
-  } else {
-    pttKeyStatusEl.textContent = '';
-  }
-});
-
-acceptCallBtn.addEventListener('click', () => {
-  if (!pendingIncomingCall) return;
+acceptCallBtn.addEventListener('click', async () => {
+  if (!pendingIncomingCall || joining) return;
   const { roomCode } = pendingIncomingCall;
-  socket.emit('call-response', { roomCode, accepted: true });
   hideIncomingCall();
-  joinRoomWithCode(roomCode);
+  joining = true;
+  const stream = await acquireMicStream();
+  if (!stream) {
+    joining = false;
+    socket.emit('call-response', { roomCode, accepted: false });
+    return;
+  }
+  socket.emit('call-response', { roomCode, accepted: true });
+  await enterRoom(roomCode, stream);
 });
 
 declineCallBtn.addEventListener('click', () => {
@@ -738,6 +1228,26 @@ declineCallBtn.addEventListener('click', () => {
   socket.emit('call-response', { roomCode: pendingIncomingCall.roomCode, accepted: false });
   hideIncomingCall();
 });
+
+cancelCallBtn.addEventListener('click', () => {
+  if (!currentOutgoingCall) return;
+  socket.emit('cancel-call', { roomCode: currentOutgoingCall.roomCode });
+  hideOutgoingCall();
+});
+
+// ---- klavye erisimi: Enter ile gonder ----
+
+authPasswordInput.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') loginBtn.click();
+});
+addFriendInput.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') addFriendBtn.click();
+});
+roomCodeInput.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') joinBtn.click();
+});
+
+// ---- baslangic ----
 
 const existingSession = getSession();
 if (existingSession.token && existingSession.username) {

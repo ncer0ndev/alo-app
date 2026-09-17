@@ -7,9 +7,7 @@
     "start": "electron .",
     "dist": "electron-builder"
   },
-  "dependencies": {
-    "socket.io-client": "^4.7.5"
-  },
+  "dependencies": {},
   "devDependencies": {
     "electron": "^31.0.0",
     "electron-builder": "^24.13.3"

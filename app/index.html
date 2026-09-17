@@ -2,6 +2,7 @@
 <html lang="tr">
 <head>
   <meta charset="UTF-8" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; connect-src 'self' https://alo-app.onrender.com wss://alo-app.onrender.com; img-src 'self'; media-src 'self' blob:; object-src 'none'; base-uri 'none'; form-action 'none';" />
   <title>Sesli Sohbet</title>
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet" />
@@ -10,11 +11,25 @@
 <body>
   <div class="crt-overlay"></div>
 
+  <div id="toast" class="toast hidden" role="status" aria-live="polite"></div>
+
+  <div id="active-call-bar" class="active-call-bar hidden">
+    <span id="active-call-text"></span>
+    <button id="return-to-call-btn" class="btn">[ ODAYA DÖN ]</button>
+  </div>
+
   <div id="incoming-call-banner" class="call-banner hidden">
     <span id="incoming-call-text"></span>
     <div class="btn-row">
       <button id="accept-call-btn" class="btn">[ KABUL ET ]</button>
       <button id="decline-call-btn" class="btn btn-ghost">[ REDDET ]</button>
+    </div>
+  </div>
+
+  <div id="outgoing-call-banner" class="call-banner hidden">
+    <span id="outgoing-call-text"></span>
+    <div class="btn-row">
+      <button id="cancel-call-btn" class="btn btn-ghost">[ ARAMAYI İPTAL ET ]</button>
     </div>
   </div>
 
@@ -38,7 +53,7 @@
           <input id="auth-password" type="password" placeholder="********" autocomplete="current-password" />
         </label>
         <div class="btn-row">
-          <button id="login-btn" class="btn">[ GIRIS YAP ]</button>
+          <button id="login-btn" class="btn">[ GİRİŞ YAP ]</button>
           <button id="register-btn" class="btn btn-secondary">[ KAYIT OL ]</button>
         </div>
         <p id="auth-status" class="status-line"></p>
@@ -51,20 +66,20 @@
         <p id="welcome-text" class="status-line ok"></p>
 
         <div class="tab-bar">
-          <button class="tab-btn active" data-tab="friends">[ ARKADASLAR ]</button>
-          <button class="tab-btn" data-tab="create">[ ODA OLUSTUR ]</button>
+          <button class="tab-btn active" data-tab="friends">[ ARKADAŞLAR ]</button>
+          <button class="tab-btn" data-tab="create">[ ODA OLUŞTUR ]</button>
           <button class="tab-btn" data-tab="join">[ ODAYA KATIL ]</button>
           <button class="tab-btn" data-tab="settings">[ AYARLAR ]</button>
-          <button class="tab-btn" data-tab="profile">[ PROFIL ]</button>
+          <button class="tab-btn" data-tab="profile">[ PROFİL ]</button>
         </div>
 
         <div id="tab-friends" class="tab-content">
-          <div class="section-header">// arkadas ekle</div>
+          <div class="section-header">// arkadaş ekle</div>
           <label class="field">
             <span class="prompt">alo:~$</span>
             <input id="add-friend-input" type="text" placeholder="kullanici_adi" />
           </label>
-          <button id="add-friend-btn" class="btn btn-secondary btn-block">[ ISTEK GONDER ]</button>
+          <button id="add-friend-btn" class="btn btn-secondary btn-block">[ İSTEK GÖNDER ]</button>
           <p id="friend-status" class="status-line"></p>
 
           <div id="incoming-requests-section" class="hidden">
@@ -72,19 +87,24 @@
             <ul id="incoming-requests" class="friend-list"></ul>
           </div>
 
-          <div class="section-header">// arkadaslar</div>
+          <div id="outgoing-requests-section" class="hidden">
+            <div class="section-header">// gönderdiğin istekler</div>
+            <ul id="outgoing-requests" class="friend-list"></ul>
+          </div>
+
+          <div class="section-header">// arkadaşlar</div>
           <ul id="friends-list" class="friend-list"></ul>
-          <p id="friends-empty" class="status-line hidden">henuz arkadasin yok</p>
+          <p id="friends-empty" class="status-line hidden">henüz arkadaşın yok</p>
         </div>
 
         <div id="tab-create" class="tab-content hidden">
-          <div class="section-header">// yeni oda olustur</div>
-          <p class="hint-text">bir oda kodu uretilir; bu kodu arkadaslarina paylasarak davet edebilirsin.</p>
-          <button id="create-room-btn" class="btn btn-block">[ ODA OLUSTUR ]</button>
+          <div class="section-header">// yeni oda oluştur</div>
+          <p class="hint-text">bir oda kodu üretilir; bu kodu arkadaşlarına paylaşarak davet edebilirsin.</p>
+          <button id="create-room-btn" class="btn btn-block">[ ODA OLUŞTUR ]</button>
         </div>
 
         <div id="tab-join" class="tab-content hidden">
-          <div class="section-header">// oda koduyla katil</div>
+          <div class="section-header">// oda koduyla katıl</div>
           <label class="field">
             <span class="prompt">room@alo:~$</span>
             <input id="room-code" type="text" placeholder="oda_kodu" />
@@ -99,7 +119,10 @@
             <select id="mic-select"></select>
           </label>
 
-          <div class="section-header">// hoparlor</div>
+          <div class="level-meter"><div id="mic-level-bar" class="level-fill"></div></div>
+          <button id="mic-test-btn" class="btn btn-ghost btn-block">[ MİKROFONU TEST ET ]</button>
+
+          <div class="section-header">// hoparlör</div>
           <label class="field">
             <span class="prompt">out:~$</span>
             <select id="speaker-select"></select>
@@ -108,7 +131,7 @@
           <div class="section-header">// mikrofon modu</div>
           <label class="radio-row">
             <input type="radio" name="mic-mode" value="always" />
-            <span>her zaman acik</span>
+            <span>her zaman açık</span>
           </label>
           <label class="radio-row">
             <input type="radio" name="mic-mode" value="voice" />
@@ -116,29 +139,31 @@
           </label>
           <label class="radio-row">
             <input type="radio" name="mic-mode" value="ptt" />
-            <span>bas konus (tusla ac/kapa)</span>
+            <span>bas konuş (tuşla aç/kapa)</span>
           </label>
 
           <div id="vad-settings" class="hidden">
             <div class="section-header">// hassasiyet</div>
-            <input id="vad-sensitivity" type="range" min="1" max="100" />
+            <input id="vad-sensitivity" type="range" min="1" max="100" aria-label="sesle aktivasyon hassasiyeti" />
           </div>
 
           <div id="ptt-settings" class="hidden">
-            <div class="section-header">// bas konus tusu</div>
+            <div class="section-header">// bas konuş tuşu</div>
             <label class="field">
-              <span class="prompt">tus:</span>
+              <span class="prompt">tuş:</span>
               <select id="ptt-key-select"></select>
             </label>
-            <p class="hint-text">not: bu tus sistem genelinde calisir. oyun icindeyken tusa basinca mikrofon acilir, tekrar basinca kapanir (basili tutma degil, ac/kapa mantigi).</p>
+            <p class="hint-text">not: bu tuş sistem genelinde çalışır. oyun içindeyken tuşa basınca mikrofon açılır, tekrar basınca kapanır (basılı tutma değil, aç/kapa mantığı).</p>
             <p id="ptt-key-status" class="status-line"></p>
           </div>
+
+          <p class="hint-text">not: bu ayarlar kalıcıdır ve görüşme sırasında da değiştirilebilir (görüşmeye dönmek için "◂ ODAYA DÖN" düğmesini kullan).</p>
         </div>
 
         <div id="tab-profile" class="tab-content hidden">
           <div class="section-header">// profil</div>
           <p id="profile-username" class="status-line ok"></p>
-          <button id="logout-btn" class="btn btn-ghost btn-block">[ CIKIS ]</button>
+          <button id="logout-btn" class="btn btn-ghost btn-block">[ ÇIKIŞ ]</button>
         </div>
 
         <p id="status" class="status-line"></p>
@@ -154,16 +179,21 @@
           <button id="copy-code-btn" class="btn btn-ghost">[ KOPYALA ]</button>
         </div>
         <div class="btn-row">
-          <button id="mute-btn" class="btn">[ MIKROFONU KAPAT ]</button>
+          <button id="mute-btn" class="btn">[ MİKROFONU KAPAT ]</button>
           <button id="leave-btn" class="btn btn-ghost">[ ODADAN AYRIL ]</button>
         </div>
+        <div class="btn-row">
+          <button id="room-settings-btn" class="btn btn-ghost">[ SES AYARLARI ]</button>
+          <button id="mute-all-btn" class="btn btn-ghost">[ TÜMÜNÜ SUSTUR ]</button>
+        </div>
         <p id="mic-indicator" class="status-line hidden"></p>
-        <div class="participants-header">// AKTIF KULLANICILAR</div>
+        <div class="participants-header">// AKTİF KULLANICILAR</div>
         <ul id="participants" class="participants"></ul>
       </div>
     </div>
   </main>
 
+  <script src="vendor/socket.io.min.js"></script>
   <script src="renderer.js"></script>
 </body>
 </html>

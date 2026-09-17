@@ -1,4 +1,6 @@
-const { app, BrowserWindow, ipcMain, globalShortcut } = require('electron');
+const { app, BrowserWindow, ipcMain, globalShortcut, shell } = require('electron');
+const path = require('path');
+const PTT_KEYS = require('./ptt-keys');
 
 let mainWindow;
 let currentPttAccelerator = null;
@@ -11,11 +13,23 @@ function createWindow() {
     autoHideMenuBar: true,
     backgroundColor: '#0a0a0a',
     webPreferences: {
-      nodeIntegration: true,
-      contextIsolation: false,
+      preload: path.join(__dirname, 'preload.js'),
+      nodeIntegration: false,
+      contextIsolation: true,
+      sandbox: true,
     },
   });
   mainWindow.loadFile('index.html');
+
+  mainWindow.webContents.setWindowOpenHandler(({ url }) => {
+    shell.openExternal(url);
+    return { action: 'deny' };
+  });
+
+  mainWindow.webContents.on('will-navigate', (event, url) => {
+    const current = mainWindow.webContents.getURL();
+    if (url !== current) event.preventDefault();
+  });
 }
 
 app.whenReady().then(() => {
@@ -32,7 +46,10 @@ function unregisterPtt() {
   }
 }
 
-ipcMain.on('register-ptt-shortcut', (event, { key }) => {
+ipcMain.on('register-ptt-shortcut', (event, config) => {
+  const key = config && config.key;
+  if (!PTT_KEYS.includes(key)) return;
+
   unregisterPtt();
   const success = globalShortcut.register(key, () => {
     mainWindow?.webContents.send('ptt-toggle');
