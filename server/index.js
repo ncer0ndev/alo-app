@@ -415,6 +415,74 @@ app.post(
   })
 );
 
+// ---- Ozel mesajlar (DM) ----
+// Yalnizca mevcut arkadaslar arasinda; kalici (Turso), gonderen her zaman
+// sunucu tarafindan dogrulanan JWT kimligi. Sunucu, istemcinin bildirdigi
+// gonderen bilgisine hicbir zaman guvenmez.
+
+app.get(
+  '/api/dm/conversations',
+  requireAuth,
+  asyncRoute(async (req, res) => {
+    const friends = await db.listFriends(req.userId);
+    const conversations = await Promise.all(
+      friends.map(async (friend) => {
+        const last = await db.getLastDirectMessage(req.userId, friend.id);
+        const unreadCount = await db.countUnreadDirectMessages(req.userId, friend.id);
+        return {
+          username: friend.username,
+          avatarId: publicAvatar(friend),
+          online: isUserOnline(friend.username),
+          lastText: last ? last.text : null,
+          lastAt: last ? Number(last.created_at) : null,
+          lastFromSelf: last ? Number(last.from_user_id) === req.userId : null,
+          unreadCount,
+        };
+      })
+    );
+    res.json({ conversations });
+  })
+);
+
+app.get(
+  '/api/dm/:username/messages',
+  requireAuth,
+  asyncRoute(async (req, res) => {
+    const targetUsername = req.params.username;
+    if (!isValidUsername(targetUsername)) return res.status(400).json({ error: 'gecersiz kullanici adi' });
+    const target = await db.getUserByUsername(targetUsername);
+    if (!target) return res.status(404).json({ error: 'kullanici bulunamadi' });
+    if (!(await db.areFriends(req.userId, target.id))) {
+      return res.status(403).json({ error: 'bu kullaniciyla arkadas degilsiniz' });
+    }
+
+    const beforeRaw = Number(req.query.before);
+    const before = Number.isFinite(beforeRaw) && beforeRaw > 0 ? beforeRaw : undefined;
+    const rows = await db.getDirectMessages(req.userId, target.id, { before, limit: 50 });
+    res.json({
+      messages: rows.map((m) => ({
+        id: m.id,
+        from: Number(m.from_user_id) === req.userId ? req.username : target.username,
+        text: m.text,
+        ts: Number(m.created_at),
+      })),
+    });
+  })
+);
+
+app.post(
+  '/api/dm/:username/read',
+  requireAuth,
+  asyncRoute(async (req, res) => {
+    const targetUsername = req.params.username;
+    if (!isValidUsername(targetUsername)) return res.status(400).json({ error: 'gecersiz kullanici adi' });
+    const target = await db.getUserByUsername(targetUsername);
+    if (!target) return res.status(404).json({ error: 'kullanici bulunamadi' });
+    await db.markDmRead(req.userId, target.id, Date.now());
+    res.json({ ok: true });
+  })
+);
+
 app.use((err, _req, res, next) => {
   if (err) return res.status(400).json({ error: 'gecersiz istek' });
   next();
@@ -444,6 +512,8 @@ io.on('connection', (socket) => {
   let currentRoom = null;
   let lastCallAttempt = 0;
   let chatTimestamps = [];
+  let dmTimestamps = [];
+  const seenDmClientIds = new Map();
 
   const cameOnline = addOnlineSocket(usernameKey, socket.id);
   socket.emit('authenticated', { username, avatarId: socket.data.avatarId });
@@ -602,6 +672,50 @@ io.on('connection', (socket) => {
 
     socket.to(currentRoom).emit('chat-message', message);
     ack({ ok: true, message });
+  });
+
+  socket.on('dm-message', (payload, ack) => {
+    if (typeof ack !== 'function') ack = () => {};
+    const { toUsername, text, clientMessageId } = payload || {};
+    if (!isValidUsername(toUsername)) return ack({ error: 'gecersiz kullanici adi' });
+    if (typeof clientMessageId !== 'string' || clientMessageId.length === 0 || clientMessageId.length > 64) {
+      return ack({ error: 'gecersiz istek' });
+    }
+
+    const existing = seenDmClientIds.get(clientMessageId);
+    if (existing) return ack({ ok: true, message: existing });
+
+    if (typeof text !== 'string' || text.trim().length === 0) return ack({ error: 'bos mesaj gonderilemez' });
+    if (text.length > CHAT_MAX_LENGTH) return ack({ error: `mesaj cok uzun (en fazla ${CHAT_MAX_LENGTH} karakter)` });
+    if (toUsername.toLowerCase() === usernameKey) return ack({ error: 'kendine mesaj gonderemezsin' });
+
+    const now = Date.now();
+    dmTimestamps = dmTimestamps.filter((t) => now - t < CHAT_RATE_WINDOW_MS);
+    if (dmTimestamps.length >= CHAT_RATE_LIMIT) {
+      return ack({ error: 'cok hizli mesaj gonderiyorsun, biraz yavasla' });
+    }
+
+    (async () => {
+      const target = await db.getUserByUsername(toUsername);
+      if (!target || !(await db.areFriends(userId, target.id))) {
+        return ack({ error: 'bu kullaniciyla arkadas degilsiniz' });
+      }
+
+      dmTimestamps.push(now);
+      const message = { id: crypto.randomUUID(), from: username, text, ts: now };
+      await db.insertDirectMessage({ id: message.id, fromUserId: userId, toUserId: target.id, text, createdAt: now });
+
+      seenDmClientIds.set(clientMessageId, message);
+      if (seenDmClientIds.size > 50) {
+        seenDmClientIds.delete(seenDmClientIds.keys().next().value);
+      }
+
+      emitToUser(target.username, 'dm-message', message);
+      ack({ ok: true, message });
+    })().catch((err) => {
+      console.error('dm-message hatasi:', err.message);
+      ack({ error: 'sunucu hatasi' });
+    });
   });
 
   socket.on('call-friend', (payload, ack) => {

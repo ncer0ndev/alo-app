@@ -51,6 +51,25 @@ async function createSchema() {
       PRIMARY KEY (from_user_id, to_user_id)
     )
   `);
+  await client.execute(`
+    CREATE TABLE IF NOT EXISTS direct_messages (
+      id TEXT PRIMARY KEY,
+      from_user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      to_user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      text TEXT NOT NULL,
+      created_at INTEGER NOT NULL
+    )
+  `);
+  await client.execute('CREATE INDEX IF NOT EXISTS idx_dm_from_to ON direct_messages(from_user_id, to_user_id, created_at)');
+  await client.execute('CREATE INDEX IF NOT EXISTS idx_dm_to_from ON direct_messages(to_user_id, from_user_id, created_at)');
+  await client.execute(`
+    CREATE TABLE IF NOT EXISTS dm_read_state (
+      user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      other_user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      last_read_at INTEGER NOT NULL DEFAULT 0,
+      PRIMARY KEY (user_id, other_user_id)
+    )
+  `);
 }
 
 async function countUsers() {
@@ -297,6 +316,62 @@ async function removeFriend(idA, idB) {
   });
 }
 
+async function insertDirectMessage({ id, fromUserId, toUserId, text, createdAt }) {
+  await client.execute({
+    sql: 'INSERT INTO direct_messages (id, from_user_id, to_user_id, text, created_at) VALUES (?, ?, ?, ?, ?)',
+    args: [id, fromUserId, toUserId, text, createdAt],
+  });
+}
+
+async function getDirectMessages(userId, otherUserId, { before, limit = 50 } = {}) {
+  const args = [userId, otherUserId, otherUserId, userId];
+  let sql = `SELECT id, from_user_id, to_user_id, text, created_at FROM direct_messages
+             WHERE ((from_user_id = ? AND to_user_id = ?) OR (from_user_id = ? AND to_user_id = ?))`;
+  if (typeof before === 'number') {
+    sql += ' AND created_at < ?';
+    args.push(before);
+  }
+  sql += ' ORDER BY created_at DESC LIMIT ?';
+  args.push(limit);
+  const res = await client.execute({ sql, args });
+  return res.rows.reverse();
+}
+
+async function getLastDirectMessage(userId, otherUserId) {
+  const res = await client.execute({
+    sql: `SELECT id, from_user_id, to_user_id, text, created_at FROM direct_messages
+          WHERE (from_user_id = ? AND to_user_id = ?) OR (from_user_id = ? AND to_user_id = ?)
+          ORDER BY created_at DESC LIMIT 1`,
+    args: [userId, otherUserId, otherUserId, userId],
+  });
+  return res.rows[0] || null;
+}
+
+async function getDmReadState(userId, otherUserId) {
+  const res = await client.execute({
+    sql: 'SELECT last_read_at FROM dm_read_state WHERE user_id = ? AND other_user_id = ?',
+    args: [userId, otherUserId],
+  });
+  return res.rows[0] ? Number(res.rows[0].last_read_at) : 0;
+}
+
+async function countUnreadDirectMessages(userId, otherUserId) {
+  const lastReadAt = await getDmReadState(userId, otherUserId);
+  const res = await client.execute({
+    sql: 'SELECT COUNT(*) AS c FROM direct_messages WHERE from_user_id = ? AND to_user_id = ? AND created_at > ?',
+    args: [otherUserId, userId, lastReadAt],
+  });
+  return Number(res.rows[0].c);
+}
+
+async function markDmRead(userId, otherUserId, ts) {
+  await client.execute({
+    sql: `INSERT INTO dm_read_state (user_id, other_user_id, last_read_at) VALUES (?, ?, ?)
+          ON CONFLICT(user_id, other_user_id) DO UPDATE SET last_read_at = MAX(last_read_at, excluded.last_read_at)`,
+    args: [userId, otherUserId, ts],
+  });
+}
+
 module.exports = {
   async setAvatar(userId, avatarId) {
     await client.execute({ sql: 'UPDATE users SET avatar_id = ? WHERE id = ?', args: [avatarId, userId] });
@@ -315,4 +390,10 @@ module.exports = {
   acceptFriendRequest,
   declineFriendRequest,
   removeFriend,
+  insertDirectMessage,
+  getDirectMessages,
+  getLastDirectMessage,
+  getDmReadState,
+  countUnreadDirectMessages,
+  markDmRead,
 };

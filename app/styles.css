@@ -516,6 +516,49 @@ input[type="range"] {
   padding: 2px 6px;
 }
 
+.tab-badge {
+  display: inline-block;
+  min-width: 14px;
+  padding: 0 4px;
+  margin-left: 2px;
+  border-radius: 8px;
+  background: var(--accent);
+  color: var(--bg);
+  font-size: 9px;
+  line-height: 14px;
+  text-align: center;
+  font-family: var(--font-data);
+}
+
+.dm-row-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.dm-row-main .preview {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--dim);
+  font-size: 11px;
+  font-family: var(--font-body);
+}
+
+.dm-row .unread-badge {
+  flex: 0 0 auto;
+  min-width: 16px;
+  padding: 2px 6px;
+  border-radius: 8px;
+  background: var(--accent);
+  color: var(--bg);
+  font-size: 10px;
+  text-align: center;
+  font-family: var(--font-data);
+}
+
 .call-banner {
   position: fixed;
   top: 14px;
@@ -764,6 +807,11 @@ textarea:focus-visible,
   padding: 6px 8px;
   max-height: 90px;
   caret-color: var(--accent);
+  scrollbar-width: none;
+}
+
+.chat-input::-webkit-scrollbar {
+  display: none;
 }
 
 .chat-input:focus {

@@ -71,4 +71,21 @@ contextBridge.exposeInMainWorld('api', {
     ipcRenderer.on('notification-chat-clicked', listener);
     return () => ipcRenderer.removeListener('notification-chat-clicked', listener);
   },
+
+  notifyDirectMessage: (data) => {
+    const { fromUsername, text, showContent } = data || {};
+    if (typeof fromUsername === 'string' && typeof text === 'string') {
+      ipcRenderer.send('notify-dm-message', { fromUsername, text, showContent: !!showContent });
+    }
+  },
+
+  onNotificationDmClicked: (callback) => {
+    const listener = (_event, payload) => callback(payload);
+    ipcRenderer.on('notification-dm-clicked', listener);
+    return () => ipcRenderer.removeListener('notification-dm-clicked', listener);
+  },
+
+  getLaunchAtLogin: () => ipcRenderer.invoke('get-launch-at-login'),
+
+  setLaunchAtLogin: (value) => ipcRenderer.send('set-launch-at-login', !!value),
 });

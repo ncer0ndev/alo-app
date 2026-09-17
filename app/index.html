@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; font-src 'self'; connect-src 'self' https://alo-app.onrender.com wss://alo-app.onrender.com; img-src 'self'; media-src 'self' blob:; object-src 'none'; base-uri 'none'; form-action 'none';" />
-  <title>Sesli Sohbet</title>
+  <title>ALO</title>
   <script src="theme-init.js"></script>
   <link rel="stylesheet" href="fonts/fonts.css" />
   <link rel="stylesheet" href="styles.css" />
@@ -77,6 +77,7 @@
 
         <div class="tab-bar">
           <button class="tab-btn active" data-tab="friends">[ ARKADAŞLAR ]</button>
+          <button class="tab-btn" data-tab="dm">[ MESAJLAR <span id="dm-tab-badge" class="tab-badge hidden"></span> ]</button>
           <button class="tab-btn" data-tab="create">[ ODA OLUŞTUR ]</button>
           <button class="tab-btn" data-tab="join">[ ODAYA KATIL ]</button>
           <button class="tab-btn" data-tab="settings">[ AYARLAR ]</button>
@@ -105,6 +106,26 @@
           <div class="section-header">// arkadaşlar</div>
           <ul id="friends-list" class="friend-list"></ul>
           <p id="friends-empty" class="status-line hidden">henüz arkadaşın yok</p>
+        </div>
+
+        <div id="tab-dm" class="tab-content hidden">
+          <div id="dm-list-view">
+            <div class="section-header">// mesajlar</div>
+            <ul id="dm-conversations" class="friend-list"></ul>
+            <p id="dm-conversations-empty" class="status-line hidden">henüz arkadaşın yok</p>
+          </div>
+          <div id="dm-thread-view" class="hidden">
+            <div class="room-code-row">
+              <button id="dm-back-btn" class="btn btn-ghost">[ ◂ GERİ ]</button>
+              <span id="dm-thread-username" class="prompt"></span>
+            </div>
+            <div id="dm-log" class="chat-log" role="log" aria-live="polite"></div>
+            <button id="dm-scroll-btn" class="btn btn-ghost chat-scroll-btn hidden">[ YENİ MESAJLAR ▾ ]</button>
+            <div class="chat-input-row">
+              <textarea id="dm-input" class="chat-input" placeholder="mesaj yaz... (Enter: gönder, Shift+Enter: yeni satır)" maxlength="2000" rows="1"></textarea>
+              <button id="dm-send-btn" class="btn">[ GÖNDER ]</button>
+            </div>
+          </div>
         </div>
 
         <div id="tab-create" class="tab-content hidden">
@@ -224,6 +245,10 @@
             <span>sohbet mesajı bildirimi (uygulama arka plandayken)</span>
           </label>
           <label class="radio-row">
+            <input type="checkbox" id="notify-dm-checkbox" />
+            <span>özel mesaj (DM) bildirimi</span>
+          </label>
+          <label class="radio-row">
             <input type="checkbox" id="notify-chat-content-checkbox" />
             <span>bildirimde mesaj içeriğini göster</span>
           </label>
@@ -235,6 +260,11 @@
             <span>pencereyi kapatınca arka planda çalışmaya devam et</span>
           </label>
           <p class="hint-text">açıksa pencereyi kapatmak uygulamayı sistem tepsisine gizler; görüşme ve bağlantı sürer. tamamen kapatmak için tepsi simgesinden "çıkış"ı kullan.</p>
+          <label class="radio-row">
+            <input type="checkbox" id="launch-at-login-checkbox" />
+            <span>bilgisayar açılışında otomatik başlat</span>
+          </label>
+          <p class="hint-text">yalnızca kurulmuş (paketlenmiş) uygulamada çalışır; kaynak koddan başlatılan geliştirme sürümünde etkisizdir.</p>
         </div>
 
         <div id="tab-profile" class="tab-content hidden">

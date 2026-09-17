@@ -26,6 +26,7 @@ function runApp() {
 
   const callNotifications = new Map(); // roomCode -> Notification
   const chatNotifyState = new Map(); // roomCode -> { timer, count, lastFrom, lastText, showContent }
+  const dmNotifyState = new Map(); // fromUsername -> { timer, count, lastText, showContent }
 
   if (process.platform === 'win32') {
     app.setAppUserModelId('com.aloapp.seslisohbet');
@@ -193,6 +194,18 @@ function runApp() {
     backgroundPref = value === true;
   });
 
+  ipcMain.handle('get-launch-at-login', (event) => {
+    if (!isTrustedSender(event)) return false;
+    if (!app.isPackaged || process.platform !== 'win32') return false;
+    return app.getLoginItemSettings().openAtLogin;
+  });
+
+  ipcMain.on('set-launch-at-login', (event, value) => {
+    if (!isTrustedSender(event)) return;
+    if (!app.isPackaged || process.platform !== 'win32') return;
+    app.setLoginItemSettings({ openAtLogin: value === true });
+  });
+
   ipcMain.on('notify-incoming-call', (event, payload) => {
     if (!isTrustedSender(event)) return;
     const { fromUsername, roomCode } = payload || {};
@@ -271,6 +284,38 @@ function runApp() {
     }, CHAT_NOTIFY_DEBOUNCE_MS);
   });
 
+  ipcMain.on('notify-dm-message', (event, payload) => {
+    if (!isTrustedSender(event)) return;
+    const { fromUsername, text, showContent } = payload || {};
+    if (!isNonEmptyString(fromUsername, 64) || typeof text !== 'string') return;
+    if (!shouldShowBackgroundNotification()) return;
+
+    let state = dmNotifyState.get(fromUsername);
+    if (!state) {
+      state = { timer: null, count: 0, lastText: '', showContent: false };
+      dmNotifyState.set(fromUsername, state);
+    }
+    state.count += 1;
+    state.lastText = text.slice(0, 120);
+    state.showContent = showContent === true;
+    if (state.timer) return;
+
+    state.timer = setTimeout(() => {
+      dmNotifyState.delete(fromUsername);
+      const body =
+        state.count > 1
+          ? `${state.count} yeni mesaj`
+          : state.showContent
+          ? state.lastText
+          : 'Yeni mesaj';
+      const notification = showSystemNotification({ title: `${fromUsername} (DM)`, body });
+      notification?.on('click', () => {
+        showAndFocus();
+        mainWindow?.webContents.send('notification-dm-clicked', { fromUsername });
+      });
+    }, CHAT_NOTIFY_DEBOUNCE_MS);
+  });
+
   app.on('window-all-closed', () => {
     if (process.platform !== 'darwin') app.quit();
   });
@@ -289,5 +334,9 @@ function runApp() {
       if (state.timer) clearTimeout(state.timer);
     }
     chatNotifyState.clear();
+    for (const state of dmNotifyState.values()) {
+      if (state.timer) clearTimeout(state.timer);
+    }
+    dmNotifyState.clear();
   });
 }

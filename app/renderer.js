@@ -71,6 +71,18 @@ const chatScrollBtn = document.getElementById('chat-scroll-btn');
 const chatInput = document.getElementById('chat-input');
 const chatSendBtn = document.getElementById('chat-send-btn');
 
+const dmTabBadge = document.getElementById('dm-tab-badge');
+const dmListView = document.getElementById('dm-list-view');
+const dmThreadView = document.getElementById('dm-thread-view');
+const dmConversationsList = document.getElementById('dm-conversations');
+const dmConversationsEmpty = document.getElementById('dm-conversations-empty');
+const dmBackBtn = document.getElementById('dm-back-btn');
+const dmThreadUsername = document.getElementById('dm-thread-username');
+const dmLogEl = document.getElementById('dm-log');
+const dmScrollBtn = document.getElementById('dm-scroll-btn');
+const dmInput = document.getElementById('dm-input');
+const dmSendBtn = document.getElementById('dm-send-btn');
+
 const micSelect = document.getElementById('mic-select');
 const speakerSelect = document.getElementById('speaker-select');
 const micModeRadios = document.querySelectorAll('input[name="mic-mode"]');
@@ -89,8 +101,10 @@ const ringtoneVolumeRow = document.getElementById('ringtone-volume-row');
 const ringtoneVolumeSlider = document.getElementById('ringtone-volume-slider');
 const notifyFriendCheckbox = document.getElementById('notify-friend-checkbox');
 const notifyChatCheckbox = document.getElementById('notify-chat-checkbox');
+const notifyDmCheckbox = document.getElementById('notify-dm-checkbox');
 const notifyChatContentCheckbox = document.getElementById('notify-chat-content-checkbox');
 const runInBackgroundCheckbox = document.getElementById('run-in-background-checkbox');
+const launchAtLoginCheckbox = document.getElementById('launch-at-login-checkbox');
 
 const PTT_KEY_OPTIONS = window.api?.pttKeyOptions || ['Space'];
 const VALID_THEMES = ['terminal', 'newsprint'];
@@ -126,6 +140,12 @@ const CHAT_HISTORY_LIMIT = 100;
 let chatMessages = [];
 let chatAutoScroll = true;
 const seenChatMessageIds = new Set();
+
+let dmConversations = [];
+let currentDmUsername = null;
+let dmMessages = [];
+let dmAutoScroll = true;
+const seenDmMessageIds = new Set();
 
 // ---- yardimci: bildirim / durum satirlari ----
 
@@ -192,6 +212,7 @@ function getSettings() {
     notifyIncomingCall: localStorage.getItem('notifyIncomingCall') !== 'false',
     notifyFriendRequest: localStorage.getItem('notifyFriendRequest') !== 'false',
     notifyChatMessage: localStorage.getItem('notifyChatMessage') === 'true',
+    notifyDmMessage: localStorage.getItem('notifyDmMessage') !== 'false',
     notifyChatContent: localStorage.getItem('notifyChatContent') === 'true',
     ringtoneEnabled: localStorage.getItem('ringtoneEnabled') !== 'false',
     ringtoneVolume: Number(localStorage.getItem('ringtoneVolume') ?? '70'),
@@ -285,6 +306,13 @@ function logout() {
   authPasswordInput.value = '';
   hideIncomingCall();
   hideOutgoingCall();
+  dmConversations = [];
+  currentDmUsername = null;
+  dmMessages = [];
+  seenDmMessageIds.clear();
+  dmListView.classList.remove('hidden');
+  dmThreadView.classList.add('hidden');
+  updateDmTabBadge();
   showScreen(authScreen);
 }
 
@@ -294,6 +322,7 @@ function showTab(tabName) {
   tabBtns.forEach((btn) => btn.classList.toggle('active', btn.dataset.tab === tabName));
   tabContents.forEach((content) => content.classList.toggle('hidden', content.id !== `tab-${tabName}`));
   if (tabName === 'settings') initSettingsTab();
+  if (tabName === 'dm') loadDmConversations();
 }
 
 // ---- TURN/ICE yapilandirmasi ----
@@ -353,9 +382,16 @@ function initSettingsTab() {
   ringtoneVolumeSlider.value = settings.ringtoneVolume;
   notifyFriendCheckbox.checked = settings.notifyFriendRequest;
   notifyChatCheckbox.checked = settings.notifyChatMessage;
+  notifyDmCheckbox.checked = settings.notifyDmMessage;
   notifyChatContentCheckbox.checked = settings.notifyChatContent;
   runInBackgroundCheckbox.checked = settings.runInBackground;
   updateRingtoneVisibility();
+
+  if (window.api) {
+    window.api.getLaunchAtLogin().then((enabled) => {
+      launchAtLoginCheckbox.checked = !!enabled;
+    });
+  }
 
   updateModeVisibility();
   populateDeviceLists();
@@ -1230,6 +1266,251 @@ function sendChatMessage() {
   sendChatWithRetry(localMsg);
 }
 
+// ---- ozel mesajlar (DM) ----
+
+function updateDmTabBadge() {
+  const total = dmConversations.reduce((sum, c) => sum + (c.unreadCount || 0), 0);
+  if (total > 0) {
+    dmTabBadge.textContent = total > 99 ? '99+' : String(total);
+    dmTabBadge.classList.remove('hidden');
+  } else {
+    dmTabBadge.classList.add('hidden');
+  }
+}
+
+function renderDmConversations() {
+  dmConversationsList.innerHTML = '';
+  const sorted = [...dmConversations].sort((a, b) => (b.lastAt || 0) - (a.lastAt || 0));
+  dmConversationsEmpty.classList.toggle('hidden', sorted.length > 0);
+
+  for (const conv of sorted) {
+    const li = document.createElement('li');
+    li.className = 'friend-row dm-row';
+    li.dataset.username = conv.username.toLowerCase();
+
+    const dot = document.createElement('span');
+    dot.className = `dot ${conv.online ? 'online' : ''}`;
+
+    const main = document.createElement('div');
+    main.className = 'dm-row-main';
+    const nameSpan = document.createElement('span');
+    nameSpan.className = 'name';
+    nameSpan.textContent = conv.username;
+    const preview = document.createElement('span');
+    preview.className = 'preview';
+    preview.textContent = conv.lastText ? `${conv.lastFromSelf ? 'sen: ' : ''}${conv.lastText}` : 'henüz mesaj yok';
+    main.append(nameSpan, preview);
+
+    li.append(dot, main);
+
+    if (conv.unreadCount > 0) {
+      const badge = document.createElement('span');
+      badge.className = 'unread-badge';
+      badge.textContent = conv.unreadCount > 99 ? '99+' : String(conv.unreadCount);
+      li.appendChild(badge);
+    }
+
+    li.addEventListener('click', () => openDmThread(conv.username));
+    dmConversationsList.appendChild(li);
+  }
+  updateDmTabBadge();
+}
+
+async function loadDmConversations() {
+  const { token } = getSession();
+  try {
+    const res = await fetch(`${getServerUrl()}/api/dm/conversations`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    if (!res.ok) return;
+    const data = await res.json();
+    dmConversations = data.conversations;
+    if (!currentDmUsername) renderDmConversations();
+    else updateDmTabBadge();
+  } catch {
+    // sessizce yoksay, bir sonraki denemede tekrar dener
+  }
+}
+
+function findDmConversation(username) {
+  return dmConversations.find((c) => c.username.toLowerCase() === username.toLowerCase());
+}
+
+function updateDmConversationPreview(username, message, fromSelf) {
+  let conv = findDmConversation(username);
+  if (!conv) {
+    conv = { username, avatarId: 'panda', online: true, lastText: null, lastAt: null, lastFromSelf: null, unreadCount: 0 };
+    dmConversations.push(conv);
+  }
+  conv.lastText = message.text;
+  conv.lastAt = message.ts;
+  conv.lastFromSelf = fromSelf;
+  if (!fromSelf && currentDmUsername?.toLowerCase() !== username.toLowerCase()) {
+    conv.unreadCount = (conv.unreadCount || 0) + 1;
+  }
+  if (!dmListView.classList.contains('hidden')) renderDmConversations();
+  else updateDmTabBadge();
+}
+
+function scrollDmToBottom() {
+  dmLogEl.scrollTop = dmLogEl.scrollHeight;
+  dmScrollBtn.classList.add('hidden');
+}
+
+function renderDmLog() {
+  dmLogEl.innerHTML = '';
+  for (const m of dmMessages) {
+    const div = document.createElement('div');
+    div.className = `chat-message ${m.own ? 'own' : ''} ${m.pending ? 'pending' : ''} ${m.failed ? 'failed' : ''}`.trim();
+
+    const meta = document.createElement('div');
+    meta.className = 'meta';
+    let metaText = `${m.own ? 'sen' : m.from} · ${formatChatTime(m.ts)}`;
+    if (m.pending) metaText += ' · gönderiliyor...';
+    if (m.failed) metaText += ' · başarısız';
+    meta.textContent = metaText;
+
+    const text = document.createElement('div');
+    text.className = 'text';
+    text.textContent = m.text;
+
+    div.append(meta, text);
+
+    if (m.failed) {
+      const retryBtn = document.createElement('button');
+      retryBtn.className = 'btn btn-ghost retry-btn';
+      retryBtn.textContent = '[ TEKRAR DENE ]';
+      retryBtn.onclick = () => {
+        m.pending = true;
+        m.failed = false;
+        renderDmLog();
+        sendDmWithRetry(m);
+      };
+      div.appendChild(retryBtn);
+    }
+
+    dmLogEl.appendChild(div);
+  }
+
+  if (dmAutoScroll) scrollDmToBottom();
+  else dmScrollBtn.classList.toggle('hidden', dmMessages.length === 0);
+}
+
+async function openDmThread(targetUsername) {
+  currentDmUsername = targetUsername;
+  dmMessages = [];
+  seenDmMessageIds.clear();
+  dmAutoScroll = true;
+  dmThreadUsername.textContent = targetUsername;
+  dmListView.classList.add('hidden');
+  dmThreadView.classList.remove('hidden');
+  renderDmLog();
+
+  const { token } = getSession();
+  try {
+    const res = await fetch(`${getServerUrl()}/api/dm/${encodeURIComponent(targetUsername)}/messages`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    if (res.ok) {
+      const data = await res.json();
+      for (const m of data.messages) {
+        if (seenDmMessageIds.has(m.id)) continue;
+        seenDmMessageIds.add(m.id);
+        dmMessages.push({ ...m, own: m.from === getSession().username });
+      }
+      if (currentDmUsername === targetUsername) renderDmLog();
+    } else if (res.status === 403) {
+      showToast('bu kullaniciyla artik arkadas degilsiniz', 'error');
+      closeDmThread();
+      return;
+    }
+  } catch {
+    // sessizce yoksay
+  }
+
+  fetch(`${getServerUrl()}/api/dm/${encodeURIComponent(targetUsername)}/read`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${token}` },
+  }).catch(() => {});
+
+  const conv = findDmConversation(targetUsername);
+  if (conv) conv.unreadCount = 0;
+  updateDmTabBadge();
+}
+
+function closeDmThread() {
+  currentDmUsername = null;
+  dmThreadView.classList.add('hidden');
+  dmListView.classList.remove('hidden');
+  renderDmConversations();
+}
+
+function sendDmWithRetry(localMsg) {
+  if (!socket || !socket.connected) {
+    localMsg.pending = false;
+    localMsg.failed = true;
+    renderDmLog();
+    return;
+  }
+  socket.emit(
+    'dm-message',
+    { toUsername: currentDmUsername, text: localMsg.text, clientMessageId: localMsg.clientMessageId },
+    (ack) => {
+      const idx = dmMessages.findIndex((m) => m.clientMessageId === localMsg.clientMessageId);
+      if (idx === -1) return;
+      if (ack && ack.ok && ack.message) {
+        seenDmMessageIds.add(ack.message.id);
+        dmMessages[idx] = { ...ack.message, own: true, clientMessageId: localMsg.clientMessageId };
+        updateDmConversationPreview(localMsg.toUsername, ack.message, true);
+      } else {
+        dmMessages[idx].pending = false;
+        dmMessages[idx].failed = true;
+        if (ack && ack.error) showToast(ack.error, 'error');
+      }
+      renderDmLog();
+    }
+  );
+}
+
+function autoResizeDmInput() {
+  dmInput.style.height = 'auto';
+  dmInput.style.height = `${Math.min(dmInput.scrollHeight, 90)}px`;
+}
+
+function sendDmMessage() {
+  const text = dmInput.value;
+  if (!text.trim() || !currentDmUsername) return;
+  if (text.length > 2000) {
+    showToast('mesaj çok uzun (en fazla 2000 karakter)', 'error');
+    return;
+  }
+  if (!socket || !socket.connected) {
+    showToast('bağlantı yok, mesaj gönderilemedi', 'error');
+    return;
+  }
+
+  const clientMessageId =
+    typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random()}`;
+  const localMsg = {
+    id: clientMessageId,
+    clientMessageId,
+    toUsername: currentDmUsername,
+    from: getSession().username,
+    text,
+    ts: Date.now(),
+    own: true,
+    pending: true,
+  };
+  dmMessages.push(localMsg);
+  dmAutoScroll = true;
+  renderDmLog();
+
+  dmInput.value = '';
+  autoResizeDmInput();
+
+  sendDmWithRetry(localMsg);
+}
+
 // ---- oda / gorusme yasam donguesu ----
 
 async function acquireMicStream() {
@@ -1547,6 +1828,34 @@ function connectSocket() {
     }
   });
 
+  socket.on('dm-message', (message) => {
+    if (seenDmMessageIds.has(message.id)) return;
+    seenDmMessageIds.add(message.id);
+    updateDmConversationPreview(message.from, message, false);
+
+    if (currentDmUsername && currentDmUsername.toLowerCase() === message.from.toLowerCase()) {
+      dmMessages.push({ ...message, own: false });
+      dmAutoScroll = dmAutoScroll || dmLogEl.scrollTop + dmLogEl.clientHeight >= dmLogEl.scrollHeight - 40;
+      renderDmLog();
+      fetch(`${getServerUrl()}/api/dm/${encodeURIComponent(message.from)}/read`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${getSession().token}` },
+      }).catch(() => {});
+      const conv = findDmConversation(message.from);
+      if (conv) conv.unreadCount = 0;
+      updateDmTabBadge();
+      return;
+    }
+
+    const settings = getSettings();
+    if (window.api && settings.notifyDmMessage) {
+      window.api.notifyDirectMessage({
+        fromUsername: message.from,
+        text: message.text,
+        showContent: settings.notifyChatContent,
+      });
+    }
+  });
 }
 
 async function rejoinAfterReconnect() {
@@ -1569,10 +1878,17 @@ async function rejoinAfterReconnect() {
 
 function setFriendOnline(username, online) {
   const row = friendsListEl.querySelector(`[data-username="${username.toLowerCase()}"]`);
-  if (!row) return;
-  row.querySelector('.dot').classList.toggle('online', online);
-  const callBtn = row.querySelector('.call-btn');
-  if (callBtn) callBtn.disabled = !online || !!currentOutgoingCall;
+  if (row) {
+    row.querySelector('.dot').classList.toggle('online', online);
+    const callBtn = row.querySelector('.call-btn');
+    if (callBtn) callBtn.disabled = !online || !!currentOutgoingCall;
+  }
+
+  const conv = findDmConversation(username);
+  if (conv) {
+    conv.online = online;
+    if (!dmListView.classList.contains('hidden')) renderDmConversations();
+  }
 }
 
 // ---- olay dinleyicileri ----
@@ -1600,6 +1916,12 @@ if (window.api) {
   });
   window.api.onNotificationChatClicked(({ roomCode } = {}) => {
     if (roomCode && currentRoomCode === roomCode) showScreen(roomScreen);
+  });
+  window.api.onNotificationDmClicked(({ fromUsername } = {}) => {
+    if (!fromUsername) return;
+    showScreen(joinScreen);
+    showTab('dm');
+    openDmThread(fromUsername);
   });
 }
 
@@ -1645,6 +1967,30 @@ chatScrollBtn.addEventListener('click', () => {
   chatAutoScroll = true;
   scrollChatToBottom();
 });
+
+dmSendBtn.addEventListener('click', sendDmMessage);
+
+dmInput.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter' && !e.shiftKey) {
+    e.preventDefault();
+    sendDmMessage();
+  }
+});
+
+dmInput.addEventListener('input', autoResizeDmInput);
+
+dmLogEl.addEventListener('scroll', () => {
+  const threshold = 40;
+  dmAutoScroll = dmLogEl.scrollTop + dmLogEl.clientHeight >= dmLogEl.scrollHeight - threshold;
+  if (dmAutoScroll) dmScrollBtn.classList.add('hidden');
+});
+
+dmScrollBtn.addEventListener('click', () => {
+  dmAutoScroll = true;
+  scrollDmToBottom();
+});
+
+dmBackBtn.addEventListener('click', closeDmThread);
 
 tabBtns.forEach((btn) => btn.addEventListener('click', () => showTab(btn.dataset.tab)));
 
@@ -1736,6 +2082,10 @@ notifyChatCheckbox.addEventListener('change', () => {
   saveSetting('notifyChatMessage', notifyChatCheckbox.checked);
 });
 
+notifyDmCheckbox.addEventListener('change', () => {
+  saveSetting('notifyDmMessage', notifyDmCheckbox.checked);
+});
+
 notifyChatContentCheckbox.addEventListener('change', () => {
   saveSetting('notifyChatContent', notifyChatContentCheckbox.checked);
 });
@@ -1743,6 +2093,10 @@ notifyChatContentCheckbox.addEventListener('change', () => {
 runInBackgroundCheckbox.addEventListener('change', () => {
   saveSetting('runInBackground', runInBackgroundCheckbox.checked);
   if (window.api) window.api.setBackgroundPref(runInBackgroundCheckbox.checked);
+});
+
+launchAtLoginCheckbox.addEventListener('change', () => {
+  if (window.api) window.api.setLaunchAtLogin(launchAtLoginCheckbox.checked);
 });
 
 acceptCallBtn.addEventListener('click', async () => {

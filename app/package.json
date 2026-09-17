@@ -1,6 +1,6 @@
 {
   "name": "sesli-sohbet-app",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "private": true,
   "main": "main.js",
   "scripts": {
@@ -18,7 +18,7 @@
   },
   "build": {
     "appId": "com.aloapp.seslisohbet",
-    "productName": "Sesli Sohbet",
+    "productName": "ALO",
     "directories": {
       "output": "dist"
     },
@@ -40,7 +40,10 @@
     },
     "nsis": {
       "oneClick": false,
-      "allowToChangeInstallationDirectory": true
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "ALO"
     }
   }
 }
