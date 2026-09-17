@@ -1,4 +1,5 @@
 const { io } = require('socket.io-client');
+const { clipboard } = require('electron');
 
 const ICE_SERVERS = [{ urls: 'stun:stun.l.google.com:19302' }];
 const SERVER_URL = 'https://alo-app.onrender.com';
@@ -18,6 +19,13 @@ const roomCodeInput = document.getElementById('room-code');
 const joinBtn = document.getElementById('join-btn');
 const logoutBtn = document.getElementById('logout-btn');
 const statusEl = document.getElementById('status');
+const profileUsernameEl = document.getElementById('profile-username');
+const createRoomBtn = document.getElementById('create-room-btn');
+const tabBtns = document.querySelectorAll('.tab-btn');
+const tabContents = document.querySelectorAll('.tab-content');
+
+const roomCodeDisplay = document.getElementById('room-code-display');
+const copyCodeBtn = document.getElementById('copy-code-btn');
 
 const addFriendInput = document.getElementById('add-friend-input');
 const addFriendBtn = document.getElementById('add-friend-btn');
@@ -32,7 +40,6 @@ const incomingCallText = document.getElementById('incoming-call-text');
 const acceptCallBtn = document.getElementById('accept-call-btn');
 const declineCallBtn = document.getElementById('decline-call-btn');
 
-const roomTitle = document.getElementById('room-title');
 const muteBtn = document.getElementById('mute-btn');
 const leaveBtn = document.getElementById('leave-btn');
 const participantsList = document.getElementById('participants');
@@ -41,6 +48,7 @@ let socket = null;
 let localStream = null;
 let muted = false;
 let pendingIncomingCall = null;
+let currentRoomCode = null;
 const peerConnections = {};
 const audioElements = {};
 const participantNames = {};
@@ -120,8 +128,29 @@ async function authRequest(endpoint) {
 function enterJoinScreen(username) {
   setAuthStatus('');
   welcomeText.textContent = `[OK] oturum acildi: ${username}`;
+  profileUsernameEl.textContent = `kullanici: ${username}`;
+  showTab('friends');
   showScreen(joinScreen);
   connectSocket();
+}
+
+function showTab(tabName) {
+  tabBtns.forEach((btn) => btn.classList.toggle('active', btn.dataset.tab === tabName));
+  tabContents.forEach((content) => content.classList.toggle('hidden', content.id !== `tab-${tabName}`));
+}
+
+function generateRoomCode() {
+  return Math.random().toString(36).slice(2, 8).toUpperCase();
+}
+
+function createRoom() {
+  joinRoomWithCode(generateRoomCode());
+}
+
+function copyRoomCode() {
+  if (!currentRoomCode) return;
+  clipboard.writeText(currentRoomCode);
+  setStatus('oda kodu panoya kopyalandi', 'ok');
 }
 
 function logout() {
@@ -424,7 +453,8 @@ async function joinRoomWithCode(roomCode) {
 
   socket.emit('join-room', { roomCode });
 
-  roomTitle.textContent = `--- room: ${roomCode} ---`;
+  currentRoomCode = roomCode;
+  roomCodeDisplay.textContent = roomCode;
   showScreen(roomScreen);
   renderParticipants(getSession().username);
 }
@@ -443,6 +473,7 @@ function leaveRoom() {
   Object.keys(peerConnections).forEach(cleanupPeer);
   if (localStream) localStream.getTracks().forEach((t) => t.stop());
   localStream = null;
+  currentRoomCode = null;
 
   showScreen(joinScreen);
   setStatus('');
@@ -460,8 +491,12 @@ registerBtn.addEventListener('click', () => authRequest('/api/register'));
 logoutBtn.addEventListener('click', logout);
 addFriendBtn.addEventListener('click', addFriend);
 joinBtn.addEventListener('click', joinRoom);
+createRoomBtn.addEventListener('click', createRoom);
+copyCodeBtn.addEventListener('click', copyRoomCode);
 leaveBtn.addEventListener('click', leaveRoom);
 muteBtn.addEventListener('click', toggleMute);
+
+tabBtns.forEach((btn) => btn.addEventListener('click', () => showTab(btn.dataset.tab)));
 
 acceptCallBtn.addEventListener('click', () => {
   if (!pendingIncomingCall) return;

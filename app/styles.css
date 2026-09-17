@@ -226,6 +226,64 @@ input:focus {
   margin-bottom: 8px;
 }
 
+.tab-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 14px 0 18px;
+  padding-bottom: 14px;
+  border-bottom: 1px dashed var(--border);
+}
+
+.tab-btn {
+  flex: 1 1 auto;
+  min-width: 90px;
+  padding: 8px 6px;
+  background: transparent;
+  border: 1px solid var(--muted);
+  color: var(--muted);
+  font-family: inherit;
+  font-size: 10px;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+
+.tab-btn:hover {
+  border-color: var(--fg);
+  color: var(--fg);
+}
+
+.tab-btn.active {
+  background: var(--fg);
+  border-color: var(--fg);
+  color: var(--bg);
+}
+
+.hint-text {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.5;
+  margin: 0 0 16px;
+}
+
+.room-code-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 16px;
+  padding-bottom: 12px;
+  border-bottom: 1px dashed var(--border);
+}
+
+.room-code-row #room-code-display {
+  flex: 1;
+  color: var(--fg);
+  font-weight: 700;
+  letter-spacing: 2px;
+  text-shadow: 0 0 5px rgba(51, 255, 0, 0.5);
+}
+
 .friend-list {
   list-style: none;
   margin: 0 0 8px;
