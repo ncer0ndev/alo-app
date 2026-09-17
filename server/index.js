@@ -305,21 +305,57 @@ app.post('/api/profile/avatar', requireAuth, friendLimiter, asyncRoute(async (re
   res.json(payload);
 }));
 
-app.get('/api/ice-servers', requireAuth, (_req, res) => {
-  const iceServers = [{ urls: 'stun:stun.l.google.com:19302' }];
-  if (process.env.TURN_URL) {
-    // Birden fazla TURN adresi (farkli port/protokol) virgulle ayrilarak
-    // TURN_URL icinde verilebilir; kisitlayici aglarda (ornegin UDP engelli)
-    // TCP/443 secenegi baglanmayi kurtarabilir.
-    const urls = process.env.TURN_URL.split(',').map((u) => u.trim()).filter(Boolean);
-    iceServers.push({
-      urls: urls.length > 1 ? urls : urls[0],
-      username: process.env.TURN_USERNAME,
-      credential: process.env.TURN_CREDENTIAL,
-    });
+const METERED_ICE_CACHE_MS = 60 * 60 * 1000; // Metered kimlik bilgileri saatlerce gecerli; her istekte cekmeye gerek yok.
+let meteredIceCache = null; // { servers, fetchedAt }
+
+async function fetchMeteredIceServers() {
+  const appName = process.env.METERED_APP_NAME;
+  const apiKey = process.env.METERED_API_KEY;
+  if (!appName || !apiKey) return null;
+
+  if (meteredIceCache && Date.now() - meteredIceCache.fetchedAt < METERED_ICE_CACHE_MS) {
+    return meteredIceCache.servers;
   }
-  res.json({ iceServers });
-});
+  try {
+    const url = `https://${appName}.metered.live/api/v1/turn/credentials?apiKey=${encodeURIComponent(apiKey)}`;
+    const res = await fetch(url);
+    if (!res.ok) throw new Error(`metered ${res.status}`);
+    const servers = await res.json();
+    if (!Array.isArray(servers) || servers.length === 0) throw new Error('beklenmeyen yanit');
+    meteredIceCache = { servers, fetchedAt: Date.now() };
+    return servers;
+  } catch (err) {
+    console.error('metered TURN kimlik bilgisi alinamadi:', err.message);
+    // Eski onbellek varsa (suresi gecmis olsa da) tamamen sesiz kalmaktansa onu kullan.
+    return meteredIceCache ? meteredIceCache.servers : null;
+  }
+}
+
+app.get(
+  '/api/ice-servers',
+  requireAuth,
+  asyncRoute(async (_req, res) => {
+    const metered = await fetchMeteredIceServers();
+    if (metered) {
+      return res.json({ iceServers: metered });
+    }
+
+    // Metered yapilandirilmamissa/ulasilamazsa eski statik TURN_URL yontemine dus.
+    const iceServers = [{ urls: 'stun:stun.l.google.com:19302' }];
+    if (process.env.TURN_URL) {
+      // Birden fazla TURN adresi (farkli port/protokol) virgulle ayrilarak
+      // TURN_URL icinde verilebilir; kisitlayici aglarda (ornegin UDP engelli)
+      // TCP/443 secenegi baglanmayi kurtarabilir.
+      const urls = process.env.TURN_URL.split(',').map((u) => u.trim()).filter(Boolean);
+      iceServers.push({
+        urls: urls.length > 1 ? urls : urls[0],
+        username: process.env.TURN_USERNAME,
+        credential: process.env.TURN_CREDENTIAL,
+      });
+    }
+    res.json({ iceServers });
+  })
+);
 
 app.get(
   '/api/friends',
