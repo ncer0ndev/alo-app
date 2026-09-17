@@ -3,24 +3,72 @@
 <head>
   <meta charset="UTF-8" />
   <title>Sesli Sohbet</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="styles.css" />
 </head>
 <body>
-  <div id="join-screen" class="screen">
-    <h1>Sesli Sohbet</h1>
-    <input id="server-url" type="text" placeholder="Sunucu adresi" value="https://alo-app.onrender.com" />
-    <input id="display-name" type="text" placeholder="Adın" />
-    <input id="room-code" type="text" placeholder="Oda kodu (arkadaşlarınla aynı kodu kullan)" />
-    <button id="join-btn">Odaya Katıl</button>
-    <p id="status"></p>
+  <div class="crt-overlay"></div>
+
+  <div class="banner">
+    <pre>+==============================+
+|      A L O  //  V O I C E     |
++==============================+</pre>
+    <div class="cursor-line">SYSTEM_READY<span class="cursor">_</span></div>
   </div>
 
-  <div id="room-screen" class="screen hidden">
-    <h2 id="room-title"></h2>
-    <button id="mute-btn">Mikrofonu Kapat</button>
-    <button id="leave-btn">Odadan Ayrıl</button>
-    <ul id="participants"></ul>
-  </div>
+  <main class="terminal">
+    <div id="auth-screen" class="window">
+      <div class="window-titlebar">--- login.sh ---</div>
+      <div class="window-body">
+        <label class="field">
+          <span class="prompt">server@target:~$</span>
+          <input id="server-url" type="text" value="https://alo-app.onrender.com" />
+        </label>
+        <label class="field">
+          <span class="prompt">user@alo:~$</span>
+          <input id="auth-username" type="text" placeholder="kullanici_adi" autocomplete="username" />
+        </label>
+        <label class="field">
+          <span class="prompt">passwd:</span>
+          <input id="auth-password" type="password" placeholder="********" autocomplete="current-password" />
+        </label>
+        <div class="btn-row">
+          <button id="login-btn" class="btn">[ GIRIS YAP ]</button>
+          <button id="register-btn" class="btn btn-secondary">[ KAYIT OL ]</button>
+        </div>
+        <p id="auth-status" class="status-line"></p>
+      </div>
+    </div>
+
+    <div id="join-screen" class="window hidden">
+      <div class="window-titlebar">--- lobby.sh ---</div>
+      <div class="window-body">
+        <p id="welcome-text" class="status-line ok"></p>
+        <label class="field">
+          <span class="prompt">room@alo:~$</span>
+          <input id="room-code" type="text" placeholder="oda_kodu" />
+        </label>
+        <div class="btn-row">
+          <button id="join-btn" class="btn">[ ODAYA KATIL ]</button>
+          <button id="logout-btn" class="btn btn-ghost">[ CIKIS ]</button>
+        </div>
+        <p id="status" class="status-line"></p>
+      </div>
+    </div>
+
+    <div id="room-screen" class="window hidden">
+      <div class="window-titlebar" id="room-title">--- room ---</div>
+      <div class="window-body">
+        <div class="btn-row">
+          <button id="mute-btn" class="btn">[ MIKROFONU KAPAT ]</button>
+          <button id="leave-btn" class="btn btn-ghost">[ ODADAN AYRIL ]</button>
+        </div>
+        <div class="participants-header">// AKTIF KULLANICILAR</div>
+        <ul id="participants" class="participants"></ul>
+      </div>
+    </div>
+  </main>
 
   <script src="renderer.js"></script>
 </body>

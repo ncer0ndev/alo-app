@@ -1,60 +1,225 @@
-body {
-  font-family: -apple-system, Segoe UI, Arial, sans-serif;
-  background: #1e1f29;
-  color: #f0f0f5;
-  margin: 0;
-  padding: 24px;
+:root {
+  --bg: #0a0a0a;
+  --panel: #050505;
+  --fg: #33ff00;
+  --secondary: #ffb000;
+  --muted: #1f521f;
+  --accent: #33ff00;
+  --error: #ff3333;
+  --border: #1f521f;
 }
 
-h1, h2 {
-  margin-top: 0;
+* {
+  box-sizing: border-box;
+}
+
+html, body {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  padding: 16px 16px 32px;
+  background: var(--bg);
+  color: var(--fg);
+  font-family: 'JetBrains Mono', 'Fira Code', Consolas, monospace;
+  font-size: 14px;
+}
+
+.crt-overlay {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 999;
+  background: repeating-linear-gradient(
+    to bottom,
+    rgba(51, 255, 0, 0.03) 0px,
+    rgba(51, 255, 0, 0.03) 1px,
+    transparent 1px,
+    transparent 3px
+  );
+}
+
+.banner {
+  text-align: center;
+  margin-bottom: 10px;
+}
+
+.banner pre {
+  margin: 0;
+  color: var(--fg);
+  text-shadow: 0 0 6px rgba(51, 255, 0, 0.55);
+  font-size: 11px;
+  line-height: 1.2;
+}
+
+.cursor-line {
+  margin-top: 4px;
+  font-size: 11px;
+  letter-spacing: 2px;
+  color: var(--muted);
+}
+
+.cursor {
+  display: inline-block;
+  color: var(--accent);
+  animation: blink 1s steps(1) infinite;
+}
+
+@keyframes blink {
+  0%, 50% { opacity: 1; }
+  50.01%, 100% { opacity: 0; }
+}
+
+.window {
+  max-width: 440px;
+  margin: 0 auto 16px;
+  border: 1px solid var(--border);
+  background: var(--panel);
+}
+
+.window-titlebar {
+  background: var(--fg);
+  color: var(--bg);
+  padding: 6px 10px;
+  font-weight: 700;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  text-align: center;
+  font-size: 12px;
+}
+
+.window-body {
+  padding: 18px 20px 20px;
+}
+
+.field {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 14px;
+}
+
+.prompt {
+  white-space: nowrap;
+  color: var(--secondary);
+  font-size: 13px;
 }
 
 input {
-  display: block;
-  width: 100%;
-  box-sizing: border-box;
-  margin-bottom: 12px;
-  padding: 10px;
-  border-radius: 6px;
-  border: 1px solid #444;
-  background: #2a2b38;
-  color: #f0f0f5;
-}
-
-button {
-  padding: 10px 16px;
-  margin-right: 8px;
-  margin-bottom: 12px;
+  flex: 1;
+  min-width: 0;
+  background: transparent;
   border: none;
-  border-radius: 6px;
-  background: #5865f2;
-  color: white;
-  cursor: pointer;
-  font-weight: 600;
+  border-bottom: 1px dashed var(--border);
+  color: var(--fg);
+  font-family: inherit;
+  font-size: 14px;
+  padding: 6px 4px;
+  caret-color: var(--accent);
 }
 
-button:hover {
-  background: #4752c4;
+input::placeholder {
+  color: var(--muted);
+}
+
+input:focus {
+  outline: none;
+  border-bottom: 1px solid var(--accent);
+  text-shadow: 0 0 4px rgba(51, 255, 0, 0.5);
+}
+
+.btn-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-bottom: 8px;
+}
+
+.btn {
+  flex: 1;
+  min-width: 120px;
+  padding: 10px 12px;
+  background: transparent;
+  border: 1px solid var(--fg);
+  color: var(--fg);
+  font-family: inherit;
+  font-size: 12px;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+
+.btn:hover {
+  background: var(--fg);
+  color: var(--bg);
+}
+
+.btn:active {
+  transform: translateY(1px);
+}
+
+.btn-secondary {
+  border-color: var(--secondary);
+  color: var(--secondary);
+}
+
+.btn-secondary:hover {
+  background: var(--secondary);
+  color: var(--bg);
+}
+
+.btn-ghost {
+  border-color: var(--muted);
+  color: var(--muted);
+}
+
+.btn-ghost:hover {
+  background: var(--muted);
+  color: var(--bg);
+}
+
+.status-line {
+  min-height: 1.2em;
+  margin: 8px 0 0;
+  font-size: 12px;
+  color: var(--secondary);
+}
+
+.status-line.ok {
+  color: var(--fg);
+  text-shadow: 0 0 5px rgba(51, 255, 0, 0.5);
+}
+
+.status-line.error {
+  color: var(--error);
+}
+
+.participants-header {
+  margin: 18px 0 8px;
+  color: var(--muted);
+  letter-spacing: 2px;
+  font-size: 11px;
+  text-transform: uppercase;
+}
+
+.participants {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.participants li {
+  padding: 6px 0;
+  border-bottom: 1px dashed var(--border);
+  font-size: 13px;
+}
+
+.participants li::before {
+  content: "> ";
+  color: var(--secondary);
 }
 
 .hidden {
   display: none;
-}
-
-#participants {
-  list-style: none;
-  padding: 0;
-}
-
-#participants li {
-  padding: 8px;
-  background: #2a2b38;
-  border-radius: 6px;
-  margin-bottom: 6px;
-}
-
-#status {
-  color: #aaa;
-  font-size: 14px;
 }
