@@ -6,7 +6,7 @@ const authScreen = document.getElementById('auth-screen');
 const joinScreen = document.getElementById('join-screen');
 const roomScreen = document.getElementById('room-screen');
 
-const serverUrlInput = document.getElementById('server-url');
+const SERVER_URL = 'https://alo-app.onrender.com';
 const authUsernameInput = document.getElementById('auth-username');
 const authPasswordInput = document.getElementById('auth-password');
 const loginBtn = document.getElementById('login-btn');
@@ -42,7 +42,7 @@ function setAuthStatus(text, kind = 'info') {
 }
 
 function getServerUrl() {
-  return serverUrlInput.value.trim().replace(/\/+$/, '');
+  return SERVER_URL;
 }
 
 function showScreen(screen) {
