@@ -1000,44 +1000,123 @@ textarea:focus-visible,
   color: var(--fg);
 }
 
-/* Topluluk ekranı: Discord benzeri üç sütunlu bilgi mimarisi. Renkler ve
-   tipografi mevcut Terminal/Gazete temalarından gelir. */
-#join-screen:has(#tab-servers:not(.hidden)) {
+/* Ana kabuk: sol tarafta kalici topluluk rayi (Discord benzeri), sagda ya
+   "ana sayfa" (arkadaslar/DM/ayarlar sekmeleri) ya da secili toplulugun
+   kanal/sohbet gorunumu. Renkler ve tipografi mevcut Terminal/Gazete
+   temalarindan gelir. */
+#join-screen {
   width: calc(100vw - 32px);
   max-width: 1180px;
 }
 
-#join-screen:has(#tab-servers:not(.hidden)) .window-body {
+#join-screen .window-body {
   padding-bottom: 14px;
 }
 
-.community-tab {
-  margin: 0 -20px -20px;
-  border-top: 1px solid var(--border);
-}
-
-.community-layout {
+.app-shell {
   min-height: 520px;
-  display: grid;
-  grid-template-columns: 220px minmax(320px, 1fr) 240px;
+  display: flex;
   background: var(--panel);
+  border-top: 1px solid var(--border);
+  margin: 0 -20px -14px;
 }
 
-.community-sidebar,
-.community-members {
+.community-rail {
+  flex: 0 0 220px;
+  width: 220px;
   min-width: 0;
   background: color-mix(in srgb, var(--bg) 82%, var(--panel));
+  border-right: 1px solid var(--border);
+  padding: 14px 10px;
+  overflow-y: auto;
+  overflow-x: hidden;
+  transition: flex-basis 0.15s ease, width 0.15s ease, padding 0.15s ease;
+}
+
+.rail-home-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  width: 100%;
+  margin-bottom: 10px;
+  padding: 9px;
+  border: 1px solid var(--dim);
+  background: transparent;
+  color: var(--dim);
+  font-family: var(--font-data);
+  font-size: 17px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.rail-home-btn:hover,
+.rail-home-btn.active {
+  border-color: var(--accent);
+  color: var(--fg);
+  background: color-mix(in srgb, var(--fg) 8%, transparent);
+}
+
+.home-area {
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: 4px 24px 20px;
   overflow: auto;
 }
 
-.community-sidebar {
-  border-right: 1px solid var(--border);
-  padding: 14px 10px;
+.home-area .tab-bar,
+.home-area .tab-content {
+  max-width: 640px;
+}
+
+.community-area {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+}
+
+.community-area.hidden,
+.home-area.hidden {
+  display: none;
+}
+
+.community-main {
+  flex: 1 1 auto;
 }
 
 .community-members {
+  flex: 0 0 240px;
+  min-width: 0;
+  background: color-mix(in srgb, var(--bg) 82%, var(--panel));
   border-left: 1px solid var(--border);
   padding: 14px 10px;
+  overflow: auto;
+}
+
+/* Topluluk secilince ray simge-genisligine kuculur (taskbar gibi); tam
+   liste yalnizca ana sayfada gorunur. */
+.community-rail.collapsed {
+  flex-basis: 64px;
+  width: 64px;
+  padding: 14px 8px;
+}
+
+.community-rail.collapsed .community-sidebar-head,
+.community-rail.collapsed .community-load-state,
+.community-rail.collapsed .community-empty,
+.community-rail.collapsed .community-action-panel {
+  display: none;
+}
+
+.community-rail.collapsed .community-server-item {
+  justify-content: center;
+  gap: 0;
+  padding: 6px 0;
+}
+
+.community-rail.collapsed .community-server-copy,
+.community-rail.collapsed .community-server-item .unread-badge {
+  display: none;
 }
 
 .community-sidebar-head {
@@ -1503,17 +1582,22 @@ textarea:focus-visible,
 .server-member-actions .btn { min-width: 0; padding: 5px 7px; font-size: 9px; }
 
 @media (max-width: 900px) {
-  .community-layout { grid-template-columns: 190px minmax(300px, 1fr); }
-  .community-members { grid-column: 2; border-top: 1px solid var(--border); border-left: 0; max-height: 260px; }
+  .community-rail { flex-basis: 170px; width: 170px; }
+  .community-area { flex-direction: column; }
+  .community-members { border-top: 1px solid var(--border); border-left: 0; max-height: 260px; }
   .server-channel-toolbar { align-items: stretch; flex-direction: column; }
   .server-create-channel { flex-wrap: wrap; }
   .server-create-channel .compact-field { min-width: 0; flex: 1 1 120px; }
 }
 
 @media (max-width: 680px) {
-  #join-screen:has(#tab-servers:not(.hidden)) { width: 100%; }
-  .community-layout { display: block; }
-  .community-sidebar { border-right: 0; border-bottom: 1px solid var(--border); max-height: 260px; }
+  #join-screen { width: 100%; }
+  .app-shell { display: block; }
+  .community-rail { width: 100%; max-height: 220px; border-right: 0; border-bottom: 1px solid var(--border); }
+  .community-rail.collapsed { max-height: none; display: flex; align-items: center; flex-wrap: wrap; gap: 6px; }
+  .community-rail.collapsed .community-server-item { margin: 0; }
+  .home-area .tab-bar,
+  .home-area .tab-content { max-width: none; }
   .community-welcome { min-height: 280px; padding: 30px 20px; }
   .server-detail-header { position: static; }
   .community-members { max-height: none; }

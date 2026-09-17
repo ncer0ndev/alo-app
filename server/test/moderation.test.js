@@ -66,12 +66,18 @@ test('moderasyon ve topluluk yonetimi: yasak, engel, sikayet, yeniden adlandirma
   const settings = await post(base, `/api/servers/${created.body.id}/settings`, owner, { name: 'Yeni Ad', iconId: 'phoenix' });
   assert.equal(settings.status, 200);
 
+  // Topluluk olusturulurken otomatik bir "genel" ana metin kanali da acilir;
+  // yeniden siralama tum kanallari (bu varsayilan dahil) icermeli.
+  const defaultChannelId = created.body.defaultChannelId;
   const first = await post(base, `/api/servers/${created.body.id}/channels`, owner, { name: 'Bir', type: 'text' });
   const second = await post(base, `/api/servers/${created.body.id}/channels`, owner, { name: 'Iki', type: 'voice' });
   assert.equal((await post(base, `/api/servers/${created.body.id}/channels/${first.body.id}/rename`, moderator, { name: 'Genel' })).status, 200);
-  assert.equal((await post(base, `/api/servers/${created.body.id}/channels/reorder`, moderator, { channelIds: [second.body.id, first.body.id] })).status, 200);
+  assert.equal(
+    (await post(base, `/api/servers/${created.body.id}/channels/reorder`, moderator, { channelIds: [second.body.id, first.body.id, defaultChannelId] })).status,
+    200
+  );
   const reordered = await (await fetch(`${base}/api/servers/${created.body.id}`, { headers: owner.headers })).json();
-  assert.deepEqual(reordered.channels.map((channel) => channel.id), [second.body.id, first.body.id]);
+  assert.deepEqual(reordered.channels.map((channel) => channel.id), [second.body.id, first.body.id, defaultChannelId]);
 
   const modCannotBanOwner = await post(base, `/api/servers/${created.body.id}/members/${owner.username}/ban`, moderator, { reason: 'olmaz' });
   assert.equal(modCannotBanOwner.status, 403);

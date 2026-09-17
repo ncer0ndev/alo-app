@@ -87,7 +87,11 @@ const chatScrollBtn = document.getElementById('chat-scroll-btn');
 const chatInput = document.getElementById('chat-input');
 const chatSendBtn = document.getElementById('chat-send-btn');
 
-const serversListView = document.getElementById('servers-list-view');
+const appShell = document.querySelector('.app-shell');
+const communityRail = document.getElementById('community-rail');
+const railHomeBtn = document.getElementById('rail-home-btn');
+const homeArea = document.getElementById('home-area');
+const communityArea = document.getElementById('community-area');
 const serverDetailView = document.getElementById('server-detail-view');
 const createServerNameInput = document.getElementById('create-server-name-input');
 const createServerBtn = document.getElementById('create-server-btn');
@@ -117,7 +121,6 @@ const createChannelSection = document.getElementById('create-channel-section');
 const createChannelTypeSelect = document.getElementById('create-channel-type-select');
 const createChannelNameInput = document.getElementById('create-channel-name-input');
 const createChannelBtn = document.getElementById('create-channel-btn');
-const serversTabBadge = document.getElementById('servers-tab-badge');
 
 const serverTextChannelView = document.getElementById('server-text-channel-view');
 const textChannelBackBtn = document.getElementById('text-channel-back-btn');
@@ -390,6 +393,7 @@ function enterJoinScreen(username) {
   profileUsernameEl.textContent = `kullanıcı: ${username}`;
   adminTabBtn.classList.toggle('hidden', username.toLowerCase() !== 'necr0n');
   showTab('friends');
+  enterHomeMode();
   showScreen(joinScreen);
   connectSocket();
   fetchIceServers();
@@ -417,9 +421,12 @@ function logout() {
   activeServerDetail = null;
   closeTextChannel();
   latestServersList = [];
+  communityRail.classList.remove('collapsed');
+  railHomeBtn.classList.add('active');
+  homeArea.classList.remove('hidden');
+  communityArea.classList.add('hidden');
   serverDetailView.classList.add('hidden');
   serverMembersPanel.classList.add('hidden');
-  serversListView.classList.remove('hidden');
   showScreen(authScreen);
 }
 
@@ -435,7 +442,6 @@ function showTab(tabName) {
   if (tabName === 'dm') loadDmConversations();
   if (tabName === 'admin') loadAdminUsers();
   if (tabName === 'profile') loadOwnStatusMessage();
-  if (tabName === 'servers') loadServersList();
 }
 
 // ---- TURN/ICE yapilandirmasi ----
@@ -1727,21 +1733,10 @@ function serverRoleLabel(role) {
   return role === 'owner' ? 'sahip' : role === 'moderator' ? 'moderatör' : 'üye';
 }
 
-function updateServersTabBadge(servers) {
-  const total = servers.reduce((sum, s) => sum + (s.unreadCount || 0), 0);
-  if (total > 0) {
-    serversTabBadge.textContent = total > 99 ? '99+' : String(total);
-    serversTabBadge.classList.remove('hidden');
-  } else {
-    serversTabBadge.classList.add('hidden');
-  }
-}
-
 function renderServersList(servers) {
   serversListEl.innerHTML = '';
   serversCountEl.textContent = String(servers.length);
   serversEmptyEl.classList.toggle('hidden', servers.length > 0);
-  updateServersTabBadge(servers);
   for (const s of servers) {
     const li = document.createElement('li');
     li.className = `community-server-item${activeServerDetail?.id === s.id ? ' active' : ''}`;
@@ -1807,13 +1802,38 @@ async function joinServerByCode() {
   }
 }
 
+// Sag tarafi "ana sayfa" (arkadaslar/DM/ayarlar sekmeleri) ile bir toplulugun
+// kanal gorunumu arasinda degistirir; sol raydaki topluluk listesi ana
+// sayfada tam (isim+rol), topluluk secilince simge-genisligine kuculur
+// (taskbar gibi) - ayni <ul id="servers-list"> tek DOM'da kalir, CSS
+// .collapsed sinifiyla gorunumu degistirir.
+
+function enterHomeMode() {
+  activeServerDetail = null;
+  closeTextChannel();
+  communityRail.classList.remove('collapsed');
+  railHomeBtn.classList.add('active');
+  homeArea.classList.remove('hidden');
+  communityArea.classList.add('hidden');
+  serverDetailView.classList.add('hidden');
+  serverMembersPanel.classList.add('hidden');
+  loadServersList();
+}
+
+function enterCommunityMode() {
+  communityRail.classList.add('collapsed');
+  railHomeBtn.classList.remove('active');
+  homeArea.classList.add('hidden');
+  communityArea.classList.remove('hidden');
+}
+
 async function openServerDetail(serverId) {
   const { token } = getSession();
+  enterCommunityMode();
   serverDetailLoadState.className = 'community-detail-state';
   serverDetailLoadMessage.textContent = 'Topluluk yükleniyor...';
   serverDetailRetryBtn.dataset.serverId = String(serverId);
   serverDetailRetryBtn.classList.add('hidden');
-  serversListView.classList.add('hidden');
   serverDetailView.classList.add('hidden');
   serverMembersPanel.classList.add('hidden');
   serverDetailLoadState.classList.remove('hidden');
@@ -1828,7 +1848,16 @@ async function openServerDetail(serverId) {
     serverDetailLoadState.classList.add('hidden');
     serverDetailView.classList.remove('hidden');
     serverMembersPanel.classList.remove('hidden');
-    if (!currentTextChannel || currentTextChannel.serverId !== serverId) showServerChannelsView();
+    if (!currentTextChannel || currentTextChannel.serverId !== serverId) {
+      // Topluluga her girildiginde (ilk olusturuldugunda dahil), ana metin
+      // kanali ("genel") otomatik acilir - Discord'daki gibi.
+      const defaultChannel = data.channels.find((c) => c.type === 'text');
+      if (defaultChannel) {
+        openTextChannel(serverId, defaultChannel.id, defaultChannel.name);
+      } else {
+        showServerChannelsView();
+      }
+    }
     loadServersList();
   } catch (err) {
     serverDetailLoadState.className = 'community-detail-state error';
@@ -1838,13 +1867,7 @@ async function openServerDetail(serverId) {
 }
 
 function closeServerDetail() {
-  activeServerDetail = null;
-  closeTextChannel();
-  serverDetailLoadState.classList.add('hidden');
-  serverDetailView.classList.add('hidden');
-  serverMembersPanel.classList.add('hidden');
-  serversListView.classList.remove('hidden');
-  loadServersList();
+  enterHomeMode();
 }
 
 function renderServerDetail() {
@@ -3510,6 +3533,7 @@ joinServerCodeInput.addEventListener('keydown', (e) => {
   if (e.key === 'Enter') joinServerBtn.click();
 });
 serverBackBtn.addEventListener('click', closeServerDetail);
+railHomeBtn.addEventListener('click', enterHomeMode);
 serversRetryBtn.addEventListener('click', loadServersList);
 serverDetailRetryBtn.addEventListener('click', () => {
   const serverId = Number(serverDetailRetryBtn.dataset.serverId);

@@ -75,12 +75,48 @@
       <div class="window-body">
         <p id="welcome-text" class="status-line ok"></p>
 
+        <div class="app-shell">
+          <aside id="community-rail" class="community-rail" aria-label="Topluluklar">
+            <button id="rail-home-btn" class="rail-home-btn active" aria-label="Ana sayfa" title="Ana sayfa">⌂</button>
+
+            <div class="community-sidebar-head">
+              <span class="community-eyebrow">TOPLULUKLAR</span>
+              <span class="community-count" id="servers-count">0</span>
+            </div>
+            <div id="servers-load-state" class="community-load-state hidden" role="status">
+              <span id="servers-load-message"></span>
+              <button id="servers-retry-btn" class="btn btn-ghost hidden">[ TEKRAR DENE ]</button>
+            </div>
+            <ul id="servers-list" class="community-server-list"></ul>
+            <p id="servers-empty" class="community-empty hidden">Henüz bir topluluğun yok.</p>
+
+            <details class="community-action-panel">
+              <summary>+ Topluluk oluştur</summary>
+              <label class="compact-field">
+                <span>AD</span>
+                <input id="create-server-name-input" type="text" maxlength="40" placeholder="topluluk adı" />
+              </label>
+              <button id="create-server-btn" class="btn btn-block">[ OLUŞTUR ]</button>
+              <p id="create-server-status" class="status-line"></p>
+            </details>
+
+            <details class="community-action-panel">
+              <summary>+ Davet koduyla katıl</summary>
+              <label class="compact-field">
+                <span>KOD</span>
+                <input id="join-server-code-input" type="text" maxlength="12" placeholder="davet_kodu" />
+              </label>
+              <button id="join-server-btn" class="btn btn-block">[ KATIL ]</button>
+              <p id="join-server-status" class="status-line"></p>
+            </details>
+          </aside>
+
+          <div id="home-area" class="home-area">
         <div class="tab-bar">
           <button class="tab-btn active" data-tab="friends">[ ARKADAŞLAR ]</button>
           <button class="tab-btn" data-tab="dm">[ MESAJLAR <span id="dm-tab-badge" class="tab-badge hidden"></span> ]</button>
           <button class="tab-btn" data-tab="create">[ ODA OLUŞTUR ]</button>
           <button class="tab-btn" data-tab="join">[ ODAYA KATIL ]</button>
-          <button class="tab-btn" data-tab="servers">[ TOPLULUKLAR <span id="servers-tab-badge" class="tab-badge hidden"></span> ]</button>
           <button class="tab-btn" data-tab="settings">[ AYARLAR ]</button>
           <button class="tab-btn" data-tab="profile">[ PROFİL ]</button>
           <button class="tab-btn hidden" data-tab="admin" id="admin-tab-btn">[ YÖNETİM ]</button>
@@ -151,174 +187,6 @@
             <input id="room-code" type="text" placeholder="oda_kodu" />
           </label>
           <button id="join-btn" class="btn btn-block">[ ODAYA KATIL ]</button>
-        </div>
-
-        <div id="tab-servers" class="tab-content community-tab hidden">
-          <div class="community-layout">
-            <aside class="community-sidebar" aria-label="Topluluklar">
-              <div class="community-sidebar-head">
-                <span class="community-eyebrow">TOPLULUKLAR</span>
-                <span class="community-count" id="servers-count">0</span>
-              </div>
-              <div id="servers-load-state" class="community-load-state hidden" role="status">
-                <span id="servers-load-message"></span>
-                <button id="servers-retry-btn" class="btn btn-ghost hidden">[ TEKRAR DENE ]</button>
-              </div>
-              <ul id="servers-list" class="community-server-list"></ul>
-              <p id="servers-empty" class="community-empty hidden">Henüz bir topluluğun yok.</p>
-
-              <details class="community-action-panel">
-                <summary>+ Topluluk oluştur</summary>
-                <label class="compact-field">
-                  <span>AD</span>
-                  <input id="create-server-name-input" type="text" maxlength="40" placeholder="topluluk adı" />
-                </label>
-                <button id="create-server-btn" class="btn btn-block">[ OLUŞTUR ]</button>
-                <p id="create-server-status" class="status-line"></p>
-              </details>
-
-              <details class="community-action-panel">
-                <summary>+ Davet koduyla katıl</summary>
-                <label class="compact-field">
-                  <span>KOD</span>
-                  <input id="join-server-code-input" type="text" maxlength="12" placeholder="davet_kodu" />
-                </label>
-                <button id="join-server-btn" class="btn btn-block">[ KATIL ]</button>
-                <p id="join-server-status" class="status-line"></p>
-              </details>
-            </aside>
-
-            <section class="community-main" aria-live="polite">
-              <div id="server-detail-load-state" class="community-detail-state hidden" role="status">
-                <div class="community-welcome-mark" aria-hidden="true">···</div>
-                <h2 id="server-detail-load-message">Topluluk yükleniyor</h2>
-                <button id="server-detail-retry-btn" class="btn btn-ghost hidden">[ TEKRAR DENE ]</button>
-              </div>
-              <div id="servers-list-view" class="community-welcome">
-                <div class="community-welcome-mark" aria-hidden="true">#</div>
-                <p class="community-kicker">ALO TOPLULUKLARI</p>
-                <h2>Bir topluluk seç</h2>
-                <p>Sesli kanalları görmek ve arkadaşlarınla konuşmak için soldaki listeden bir topluluk aç.</p>
-              </div>
-
-              <div id="server-detail-view" class="server-detail hidden">
-                <header class="server-detail-header">
-                  <span id="server-detail-icon" class="community-detail-icon" aria-hidden="true"></span>
-                  <div class="server-detail-title">
-                    <span class="community-kicker">TOPLULUK</span>
-                    <h2 id="server-detail-name"></h2>
-                  </div>
-                  <button id="server-back-btn" class="btn btn-ghost server-back-btn" aria-label="Topluluk seçimine dön">[ TOPLULUKLAR ]</button>
-                </header>
-
-                <div id="server-channels-view">
-                <div class="server-channel-toolbar">
-                  <div>
-                    <span class="community-kicker">KANALLAR</span>
-                    <p>Metin kanalları kalıcı yazışma, sesli kanallar görüşme içindir.</p>
-                  </div>
-                  <div id="create-channel-section" class="server-create-channel hidden">
-                    <label class="compact-field">
-                      <span>TÜR</span>
-                      <select id="create-channel-type-select">
-                        <option value="text" selected># metin</option>
-                        <option value="voice">ses</option>
-                      </select>
-                    </label>
-                    <label class="compact-field">
-                      <span>YENİ KANAL</span>
-                      <input id="create-channel-name-input" type="text" maxlength="40" placeholder="kanal adı" />
-                    </label>
-                    <button id="create-channel-btn" class="btn btn-ghost">[ + EKLE ]</button>
-                  </div>
-                </div>
-
-                <div class="server-channel-group">
-                  <div class="server-channel-group-head">METİN KANALLARI</div>
-                  <ul id="server-text-channels-list" class="server-channel-list"></ul>
-                  <p id="server-text-channels-empty" class="community-empty hidden">Henüz metin kanalı yok.</p>
-                </div>
-
-                <div class="server-channel-group">
-                  <div class="server-channel-group-head">SES KANALLARI</div>
-                  <ul id="server-voice-channels-list" class="server-channel-list"></ul>
-                  <p id="server-voice-channels-empty" class="community-empty hidden">Henüz sesli kanal yok.</p>
-                </div>
-
-                <div class="server-admin-panel">
-                  <div id="server-invite-section" class="hidden">
-                    <span class="community-kicker">DAVET KODU · YALNIZCA SAHİP</span>
-                    <div class="server-invite-row">
-                      <strong id="server-invite-code"></strong>
-                      <button id="copy-server-invite-btn" class="btn btn-ghost">[ KOPYALA ]</button>
-                      <button id="regen-server-invite-btn" class="btn btn-ghost">[ YENİLE ]</button>
-                    </div>
-                  </div>
-                  <div class="server-danger-actions">
-                    <button id="leave-server-btn" class="btn btn-ghost hidden">[ TOPLULUKTAN AYRIL ]</button>
-                    <button id="delete-server-btn" class="btn btn-ghost hidden">[ TOPLULUĞU SİL ]</button>
-                  </div>
-                  <details id="server-management-section" class="community-management hidden">
-                    <summary>TOPLULUK YÖNETİMİ</summary>
-                    <div class="community-management-grid">
-                      <label class="compact-field"><span>TOPLULUK ADI</span><input id="server-rename-input" type="text" maxlength="40" /></label>
-                      <label class="compact-field"><span>TOPLULUK SİMGESİ</span><select id="server-icon-select"></select></label>
-                    </div>
-                    <button id="save-server-settings-btn" class="btn btn-ghost">[ AYARLARI KAYDET ]</button>
-                    <div class="community-transfer-row">
-                      <label class="compact-field"><span>SAHİPLİĞİ DEVRET</span><select id="server-transfer-select"></select></label>
-                      <button id="transfer-server-btn" class="btn btn-ghost">[ DEVRET ]</button>
-                    </div>
-                  </details>
-                  <details id="server-moderation-section" class="community-management hidden">
-                    <summary>MODERASYON</summary>
-                    <div class="community-management-actions">
-                      <button id="load-server-bans-btn" class="btn btn-ghost">[ YASAKLILAR ]</button>
-                      <button id="load-server-audit-btn" class="btn btn-ghost">[ YÖNETİM GÜNLÜĞÜ ]</button>
-                    </div>
-                    <ul id="server-management-list" class="management-list"></ul>
-                  </details>
-                  <p id="server-detail-status" class="status-line"></p>
-                </div>
-              </div>
-
-              <div id="server-text-channel-view" class="server-text-channel hidden">
-                <div class="server-text-channel-header">
-                  <button id="text-channel-back-btn" class="btn btn-ghost">[ ◂ KANALLAR ]</button>
-                  <span id="text-channel-name" class="server-text-channel-title"></span>
-                </div>
-
-                <div id="text-channel-load-state" class="community-detail-state hidden" role="status">
-                  <span id="text-channel-load-message"></span>
-                  <button id="text-channel-retry-btn" class="btn btn-ghost hidden">[ TEKRAR DENE ]</button>
-                </div>
-
-                <div id="text-channel-log" class="chat-log community-message-log" role="log" aria-live="polite"></div>
-                <p id="text-channel-empty" class="community-empty hidden">Henüz mesaj yok. İlk mesajı sen yaz.</p>
-                <button id="text-channel-scroll-btn" class="btn btn-ghost chat-scroll-btn hidden">[ YENİ MESAJLAR ▾ ]</button>
-
-                <div class="chat-input-row">
-                  <textarea
-                    id="text-channel-input"
-                    class="chat-input"
-                    placeholder="mesaj yaz... (Enter: gönder, Shift+Enter: yeni satır)"
-                    maxlength="2000"
-                    rows="1"
-                  ></textarea>
-                  <button id="text-channel-send-btn" class="btn">[ GÖNDER ]</button>
-                </div>
-              </div>
-              </div>
-            </section>
-
-            <aside id="server-members-panel" class="community-members hidden" aria-label="Topluluk üyeleri">
-              <div class="community-sidebar-head">
-                <span class="community-eyebrow">ÜYELER</span>
-                <span class="community-count" id="server-members-count">0</span>
-              </div>
-              <ul id="server-members-list" class="server-member-list"></ul>
-            </aside>
-          </div>
         </div>
 
         <div id="tab-settings" class="tab-content hidden">
@@ -490,6 +358,135 @@
           <div class="section-header">// açık şikâyetler</div>
           <ul id="admin-reports-list" class="friend-list"></ul>
           <p id="admin-status" class="status-line"></p>
+        </div>
+          </div>
+
+          <div id="community-area" class="community-area hidden">
+            <section class="community-main" aria-live="polite">
+              <div id="server-detail-load-state" class="community-detail-state hidden" role="status">
+                <div class="community-welcome-mark" aria-hidden="true">···</div>
+                <h2 id="server-detail-load-message">Topluluk yükleniyor</h2>
+                <button id="server-detail-retry-btn" class="btn btn-ghost hidden">[ TEKRAR DENE ]</button>
+              </div>
+
+              <div id="server-detail-view" class="server-detail hidden">
+                <header class="server-detail-header">
+                  <span id="server-detail-icon" class="community-detail-icon" aria-hidden="true"></span>
+                  <div class="server-detail-title">
+                    <span class="community-kicker">TOPLULUK</span>
+                    <h2 id="server-detail-name"></h2>
+                  </div>
+                  <button id="server-back-btn" class="btn btn-ghost server-back-btn" aria-label="Ana sayfaya dön">[ ANA SAYFA ]</button>
+                </header>
+
+                <div id="server-channels-view">
+                <div class="server-channel-toolbar">
+                  <div>
+                    <span class="community-kicker">KANALLAR</span>
+                    <p>Metin kanalları kalıcı yazışma, sesli kanallar görüşme içindir.</p>
+                  </div>
+                  <div id="create-channel-section" class="server-create-channel hidden">
+                    <label class="compact-field">
+                      <span>TÜR</span>
+                      <select id="create-channel-type-select">
+                        <option value="text" selected># metin</option>
+                        <option value="voice">ses</option>
+                      </select>
+                    </label>
+                    <label class="compact-field">
+                      <span>YENİ KANAL</span>
+                      <input id="create-channel-name-input" type="text" maxlength="40" placeholder="kanal adı" />
+                    </label>
+                    <button id="create-channel-btn" class="btn btn-ghost">[ + EKLE ]</button>
+                  </div>
+                </div>
+
+                <div class="server-channel-group">
+                  <div class="server-channel-group-head">METİN KANALLARI</div>
+                  <ul id="server-text-channels-list" class="server-channel-list"></ul>
+                  <p id="server-text-channels-empty" class="community-empty hidden">Henüz metin kanalı yok.</p>
+                </div>
+
+                <div class="server-channel-group">
+                  <div class="server-channel-group-head">SES KANALLARI</div>
+                  <ul id="server-voice-channels-list" class="server-channel-list"></ul>
+                  <p id="server-voice-channels-empty" class="community-empty hidden">Henüz sesli kanal yok.</p>
+                </div>
+
+                <div class="server-admin-panel">
+                  <div id="server-invite-section" class="hidden">
+                    <span class="community-kicker">DAVET KODU · YALNIZCA SAHİP</span>
+                    <div class="server-invite-row">
+                      <strong id="server-invite-code"></strong>
+                      <button id="copy-server-invite-btn" class="btn btn-ghost">[ KOPYALA ]</button>
+                      <button id="regen-server-invite-btn" class="btn btn-ghost">[ YENİLE ]</button>
+                    </div>
+                  </div>
+                  <div class="server-danger-actions">
+                    <button id="leave-server-btn" class="btn btn-ghost hidden">[ TOPLULUKTAN AYRIL ]</button>
+                    <button id="delete-server-btn" class="btn btn-ghost hidden">[ TOPLULUĞU SİL ]</button>
+                  </div>
+                  <details id="server-management-section" class="community-management hidden">
+                    <summary>TOPLULUK YÖNETİMİ</summary>
+                    <div class="community-management-grid">
+                      <label class="compact-field"><span>TOPLULUK ADI</span><input id="server-rename-input" type="text" maxlength="40" /></label>
+                      <label class="compact-field"><span>TOPLULUK SİMGESİ</span><select id="server-icon-select"></select></label>
+                    </div>
+                    <button id="save-server-settings-btn" class="btn btn-ghost">[ AYARLARI KAYDET ]</button>
+                    <div class="community-transfer-row">
+                      <label class="compact-field"><span>SAHİPLİĞİ DEVRET</span><select id="server-transfer-select"></select></label>
+                      <button id="transfer-server-btn" class="btn btn-ghost">[ DEVRET ]</button>
+                    </div>
+                  </details>
+                  <details id="server-moderation-section" class="community-management hidden">
+                    <summary>MODERASYON</summary>
+                    <div class="community-management-actions">
+                      <button id="load-server-bans-btn" class="btn btn-ghost">[ YASAKLILAR ]</button>
+                      <button id="load-server-audit-btn" class="btn btn-ghost">[ YÖNETİM GÜNLÜĞÜ ]</button>
+                    </div>
+                    <ul id="server-management-list" class="management-list"></ul>
+                  </details>
+                  <p id="server-detail-status" class="status-line"></p>
+                </div>
+              </div>
+
+              <div id="server-text-channel-view" class="server-text-channel hidden">
+                <div class="server-text-channel-header">
+                  <button id="text-channel-back-btn" class="btn btn-ghost">[ ◂ KANALLAR ]</button>
+                  <span id="text-channel-name" class="server-text-channel-title"></span>
+                </div>
+
+                <div id="text-channel-load-state" class="community-detail-state hidden" role="status">
+                  <span id="text-channel-load-message"></span>
+                  <button id="text-channel-retry-btn" class="btn btn-ghost hidden">[ TEKRAR DENE ]</button>
+                </div>
+
+                <div id="text-channel-log" class="chat-log community-message-log" role="log" aria-live="polite"></div>
+                <p id="text-channel-empty" class="community-empty hidden">Henüz mesaj yok. İlk mesajı sen yaz.</p>
+                <button id="text-channel-scroll-btn" class="btn btn-ghost chat-scroll-btn hidden">[ YENİ MESAJLAR ▾ ]</button>
+
+                <div class="chat-input-row">
+                  <textarea
+                    id="text-channel-input"
+                    class="chat-input"
+                    placeholder="mesaj yaz... (Enter: gönder, Shift+Enter: yeni satır)"
+                    maxlength="2000"
+                    rows="1"
+                  ></textarea>
+                  <button id="text-channel-send-btn" class="btn">[ GÖNDER ]</button>
+                </div>
+              </div>
+              </div>
+            </section>
+
+            <aside id="server-members-panel" class="community-members hidden" aria-label="Topluluk üyeleri">
+              <div class="community-sidebar-head">
+                <span class="community-eyebrow">ÜYELER</span>
+                <span class="community-count" id="server-members-count">0</span>
+              </div>
+              <ul id="server-members-list" class="server-member-list"></ul>
+            </aside>
+          </div>
         </div>
 
         <p id="status" class="status-line"></p>

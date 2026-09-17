@@ -519,7 +519,12 @@ async function createServer(name, ownerUserId) {
         sql: "INSERT INTO server_members (server_id, user_id, role) VALUES (?, ?, 'owner')",
         args: [serverId, ownerUserId],
       });
-      return serverId;
+      // Her topluluk, ilk girişte/oluşturulduğunda açılacak bir ana metin
+      // kanalıyla ("genel") başlar; istemci sıradaki ilk metin kanalını
+      // (position ASC) varsayılan olarak açar, bu yuzden ayrı bir "varsayılan
+      // kanal" bayrağına gerek yok.
+      const defaultChannelId = await createChannel(serverId, 'genel', 'text');
+      return { serverId, defaultChannelId };
     } catch (err) {
       if (isUniqueViolation(err)) continue;
       throw err;

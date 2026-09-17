@@ -831,10 +831,17 @@ app.post(
   asyncRoute(async (req, res) => {
     const { name } = req.body || {};
     if (!isValidServerOrChannelName(name)) return res.status(400).json({ error: 'gecersiz topluluk adi (2-40 karakter)' });
-    const serverId = await db.createServer(name.trim(), req.userId);
+    const { serverId, defaultChannelId } = await db.createServer(name.trim(), req.userId);
     const server = await db.getServerById(serverId);
     await db.addServerAuditLog(serverId, req.userId, 'community_created', server.name);
-    res.json({ id: server.id, name: server.name, iconId: server.icon_id, inviteCode: server.invite_code, role: 'owner' });
+    res.json({
+      id: server.id,
+      name: server.name,
+      iconId: server.icon_id,
+      inviteCode: server.invite_code,
+      role: 'owner',
+      defaultChannelId,
+    });
   })
 );
 
