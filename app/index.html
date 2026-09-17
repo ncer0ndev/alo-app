@@ -7,6 +7,7 @@
   <script src="theme-init.js"></script>
   <link rel="stylesheet" href="fonts/fonts.css" />
   <link rel="stylesheet" href="styles.css" />
+  <link rel="stylesheet" href="avatars.css" />
 </head>
 <body>
   <div class="texture-overlay" aria-hidden="true"></div>
@@ -30,6 +31,14 @@
     <span id="outgoing-call-text"></span>
     <div class="btn-row">
       <button id="cancel-call-btn" class="btn btn-ghost">[ ARAMAYI İPTAL ET ]</button>
+    </div>
+  </div>
+
+  <div id="switch-room-banner" class="call-banner hidden">
+    <span id="switch-room-text"></span>
+    <div class="btn-row">
+      <button id="switch-room-confirm-btn" class="btn">[ EVET, GEÇ ]</button>
+      <button id="switch-room-cancel-btn" class="btn btn-ghost">[ VAZGEÇ ]</button>
     </div>
   </div>
 
@@ -101,6 +110,14 @@
         <div id="tab-create" class="tab-content hidden">
           <div class="section-header">// yeni oda oluştur</div>
           <p class="hint-text">bir oda kodu üretilir; bu kodu arkadaşlarına paylaşarak davet edebilirsin.</p>
+          <label class="radio-row">
+            <input type="radio" name="create-room-access" value="invite" checked />
+            <span>yalnızca davetle</span>
+          </label>
+          <label class="radio-row">
+            <input type="radio" name="create-room-access" value="friends" />
+            <span>arkadaşlarım katılabilir (onaysız)</span>
+          </label>
           <button id="create-room-btn" class="btn btn-block">[ ODA OLUŞTUR ]</button>
         </div>
 
@@ -185,11 +202,49 @@
           </div>
 
           <p class="hint-text">not: bu ayarlar kalıcıdır ve görüşme sırasında da değiştirilebilir (görüşmeye dönmek için "◂ ODAYA DÖN" düğmesini kullan).</p>
+
+          <div class="section-header">// bildirimler</div>
+          <label class="radio-row">
+            <input type="checkbox" id="notify-call-checkbox" />
+            <span>gelen arama bildirimi</span>
+          </label>
+          <label class="radio-row">
+            <input type="checkbox" id="ringtone-enabled-checkbox" />
+            <span>gelen arama zili</span>
+          </label>
+          <div id="ringtone-volume-row" class="hidden">
+            <input id="ringtone-volume-slider" type="range" min="0" max="100" aria-label="zil ses seviyesi" />
+          </div>
+          <label class="radio-row">
+            <input type="checkbox" id="notify-friend-checkbox" />
+            <span>arkadaşlık isteği bildirimi</span>
+          </label>
+          <label class="radio-row">
+            <input type="checkbox" id="notify-chat-checkbox" />
+            <span>sohbet mesajı bildirimi (uygulama arka plandayken)</span>
+          </label>
+          <label class="radio-row">
+            <input type="checkbox" id="notify-chat-content-checkbox" />
+            <span>bildirimde mesaj içeriğini göster</span>
+          </label>
+          <p class="hint-text">kapalıyken bildirimde yalnızca gönderen adı ve "yeni mesaj" görünür. uygulama ön plandayken sistem bildirimi gösterilmez, sohbet zaten ekranda görünür.</p>
+
+          <div class="section-header">// pencere ve tepsi</div>
+          <label class="radio-row">
+            <input type="checkbox" id="run-in-background-checkbox" />
+            <span>pencereyi kapatınca arka planda çalışmaya devam et</span>
+          </label>
+          <p class="hint-text">açıksa pencereyi kapatmak uygulamayı sistem tepsisine gizler; görüşme ve bağlantı sürer. tamamen kapatmak için tepsi simgesinden "çıkış"ı kullan.</p>
         </div>
 
         <div id="tab-profile" class="tab-content hidden">
           <div class="section-header">// profil</div>
           <p id="profile-username" class="status-line ok"></p>
+          <div id="profile-avatar-preview"></div>
+          <div class="section-header">// profil resmini seç</div>
+          <p class="hint-text">Seçimin hesabına kaydedilir ve arkadaşlarına görünür.</p>
+          <div id="avatar-grid" class="avatar-grid" role="group" aria-label="Profil resmi seçimi"></div>
+          <p id="avatar-status" class="status-line" role="status" aria-live="polite"></p>
           <button id="logout-btn" class="btn btn-ghost btn-block">[ ÇIKIŞ ]</button>
         </div>
 
@@ -214,6 +269,19 @@
           <button id="mute-all-btn" class="btn btn-ghost">[ TÜMÜNÜ SUSTUR ]</button>
         </div>
         <p id="mic-indicator" class="status-line hidden"></p>
+
+        <div id="room-access-section" class="hidden">
+          <div class="section-header">// erişim (sahip)</div>
+          <label class="radio-row">
+            <input type="radio" name="room-access" value="invite" />
+            <span>yalnızca davetle</span>
+          </label>
+          <label class="radio-row">
+            <input type="radio" name="room-access" value="friends" />
+            <span>arkadaşlarım katılabilir (onaysız)</span>
+          </label>
+        </div>
+
         <div class="participants-header">// AKTİF KULLANICILAR</div>
         <ul id="participants" class="participants"></ul>
 
@@ -230,6 +298,9 @@
   </main>
 
   <script src="vendor/socket.io.min.js"></script>
+  <script src="avatar-catalog.js"></script>
+  <script src="avatars.js"></script>
   <script src="renderer.js"></script>
+
 </body>
 </html>

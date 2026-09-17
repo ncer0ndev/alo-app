@@ -1,2 +1,5 @@
 node_modules/
 dist/
+.npm-cache/
+server/test/.test-*.db
+server/test/.persist-*.db

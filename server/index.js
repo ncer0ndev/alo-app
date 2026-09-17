@@ -8,6 +8,12 @@ const jwt = require('jsonwebtoken');
 const rateLimit = require('express-rate-limit');
 
 const db = require('./db');
+const avatarCatalog = require('./avatar-catalog.json');
+function publicAvatar(user) {
+  const id = user?.avatar_id;
+  if (id === 'phoenix' && user?.username?.toLowerCase() !== 'necr0n') return 'panda';
+  return avatarCatalog.some((avatar) => avatar.id === id) ? id : 'panda';
+}
 
 const JWT_SECRET = process.env.JWT_SECRET;
 if (!JWT_SECRET) {
@@ -52,9 +58,10 @@ app.use(express.json());
 const server = http.createServer(app);
 const io = new Server(server, { cors: { origin: '*' } });
 
-const rooms = new Map(); // roomCode -> { members: Set<socketId>, createdAt, messages: [], seenClientIds: Map }
+const rooms = new Map(); // roomCode -> { members, createdAt, messages, seenClientIds, type, ownerUserId, ownerUsername, access, lastNotifiedOpen }
 const onlineUsers = new Map(); // usernameLower -> Set<socketId>
 const pendingCalls = new Map(); // roomCode -> { callerSocketId, calleeSocketId, timeoutHandle }
+const ownerActiveRoom = new Map(); // ownerUserId -> roomCode (sadece sahibin fiilen odada oldugu 'room' tipi odalar)
 
 function addOnlineSocket(key, socketId) {
   let set = onlineUsers.get(key);
@@ -117,15 +124,58 @@ function generateRoomCode() {
   return code;
 }
 
-function createRoomEntry() {
+function createRoomEntry({ ownerUserId = null, ownerUsername = null, type = 'room' } = {}) {
   const code = generateRoomCode();
-  rooms.set(code, { members: new Set(), createdAt: Date.now(), messages: [], seenClientIds: new Map() });
+  rooms.set(code, {
+    members: new Set(),
+    createdAt: Date.now(),
+    messages: [],
+    seenClientIds: new Map(),
+    type, // 'room' (kullanicinin olusturdugu oda) | 'call' (birebir arama)
+    ownerUserId,
+    ownerUsername,
+    access: 'invite', // 'invite' | 'friends' - sadece type==='room' icin anlamli
+    lastNotifiedOpen: false,
+  });
   return code;
 }
 
 function cleanupEmptyRoom(code) {
   const room = rooms.get(code);
   if (room && room.members.size === 0) rooms.delete(code);
+}
+
+// Sahibin, kendi 'room' tipindeki odasinda fiilen (en az bir soketiyle) bulunup
+// bulunmadigini kontrol eder. Sahiplik istemciden degil, oda olusturulurken
+// sunucuda atanan ownerUserId'den okunur.
+function isOwnerInRoom(room) {
+  if (!room || !room.ownerUserId) return false;
+  for (const sid of room.members) {
+    const s = io.sockets.sockets.get(sid);
+    if (s && s.data.userId === room.ownerUserId) return true;
+  }
+  return false;
+}
+
+// Bir kullanicinin arkadaslara acik ve fiilen erisilebilir bir odasi varsa
+// oda kodunu dondurur; yoksa null. Bu, arkadas-uzerinden-katilim akisinin
+// tek yetkili kaynagidir (istemciye guvenilmez).
+function getOpenRoomForUser(ownerUserId) {
+  const roomCode = ownerActiveRoom.get(ownerUserId);
+  if (!roomCode) return null;
+  const room = rooms.get(roomCode);
+  if (!room || room.type !== 'room' || room.access !== 'friends' || !isOwnerInRoom(room)) return null;
+  return roomCode;
+}
+
+function refreshOwnerRoomStatus(room) {
+  if (!room || room.type !== 'room' || !room.ownerUserId) return;
+  const isOpen = !!getOpenRoomForUser(room.ownerUserId);
+  if (room.lastNotifiedOpen === isOpen) return;
+  room.lastNotifiedOpen = isOpen;
+  notifyFriends(room.ownerUserId, 'friend-room-status', { username: room.ownerUsername, roomOpen: isOpen }).catch((err) =>
+    console.error('friend-room-status bildirim hatasi:', err.message)
+  );
 }
 
 setInterval(() => {
@@ -141,13 +191,17 @@ function startCallTimeout(roomCode) {
     if (!call) return;
     pendingCalls.delete(roomCode);
     io.to(call.callerSocketId).emit('call-timeout', { roomCode });
+    io.to(call.calleeSocketId).emit('call-cancelled', { roomCode, reason: 'timeout' });
     cleanupEmptyRoom(roomCode);
   }, CALL_TIMEOUT_MS);
 }
 
 // ---- HTTP API ----
 
-const authLimiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 20, standardHeaders: true, legacyHeaders: false });
+// Giris (brute-force korumasi icin siki) ve kayit (kotuye kullanim onleme icin
+// daha gevsek - UNIQUE kisiti zaten hesap spam'ini anlamsizlastirir) ayri limitlere sahip.
+const loginLimiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 20, standardHeaders: true, legacyHeaders: false });
+const registerLimiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 200, standardHeaders: true, legacyHeaders: false });
 const friendLimiter = rateLimit({ windowMs: 60 * 1000, max: 30, standardHeaders: true, legacyHeaders: false });
 
 function requireAuth(req, res, next) {
@@ -175,7 +229,7 @@ app.get('/', (_req, res) => res.send('Sesli sohbet sinyalleşme sunucusu çalı�
 
 app.post(
   '/api/register',
-  authLimiter,
+  registerLimiter,
   asyncRoute(async (req, res) => {
     const { username, password } = req.body || {};
     if (!isValidUsername(username)) {
@@ -203,7 +257,7 @@ app.post(
 
 app.post(
   '/api/login',
-  authLimiter,
+  loginLimiter,
   asyncRoute(async (req, res) => {
     const { username, password } = req.body || {};
     if (!isNonEmptyString(username, 20) || !isNonEmptyString(password, 72)) {
@@ -218,9 +272,38 @@ app.post(
   })
 );
 
-app.get('/api/me', requireAuth, (req, res) => {
-  res.json({ username: req.username });
-});
+app.get('/api/me', requireAuth, asyncRoute(async (req, res) => {
+  const user = await db.getUserById(req.userId);
+  if (!user) return res.status(401).json({ error: 'gecersiz oturum' });
+  res.json({ username: user.username, avatarId: publicAvatar(user) });
+}));
+
+app.post('/api/profile/avatar', requireAuth, friendLimiter, asyncRoute(async (req, res) => {
+  const user = await db.getUserById(req.userId);
+  if (!user) return res.status(401).json({ error: 'gecersiz oturum' });
+  const { avatarId } = req.body || {};
+  if (!avatarCatalog.some((avatar) => avatar.id === avatarId)) return res.status(400).json({ error: 'Gecersiz profil resmi.' });
+  if (avatarId === 'phoenix' && user.username.toLowerCase() !== 'necr0n') {
+    return res.status(403).json({ error: 'Anka kusu yalnizca necr0n hesabina ozeldir.' });
+  }
+  await db.setAvatar(user.id, avatarId);
+  const payload = { username: user.username, avatarId };
+  const recipients = new Set(onlineUsers.get(user.username.toLowerCase()) || []);
+  for (const sid of recipients) {
+    const active = io.sockets.sockets.get(sid);
+    if (active) active.data.avatarId = avatarId;
+  }
+  for (const friend of await db.listFriends(user.id)) {
+    for (const sid of onlineUsers.get(friend.username.toLowerCase()) || []) recipients.add(sid);
+  }
+  for (const room of rooms.values()) {
+    if ([...room.members].some((sid) => io.sockets.sockets.get(sid)?.data.userId === user.id)) {
+      for (const sid of room.members) recipients.add(sid);
+    }
+  }
+  for (const sid of recipients) io.to(sid).emit('profile-updated', payload);
+  res.json(payload);
+}));
 
 app.get('/api/ice-servers', requireAuth, (_req, res) => {
   const iceServers = [{ urls: 'stun:stun.l.google.com:19302' }];
@@ -239,7 +322,12 @@ app.get(
   requireAuth,
   asyncRoute(async (req, res) => {
     const friendRows = await db.listFriends(req.userId);
-    const friends = friendRows.map((f) => ({ username: f.username, online: isUserOnline(f.username) }));
+    const friends = friendRows.map((f) => ({
+      username: f.username,
+      avatarId: publicAvatar(f),
+      online: isUserOnline(f.username),
+      roomOpen: !!getOpenRoomForUser(f.id),
+    }));
     const incoming = (await db.listIncomingRequests(req.userId)).map((u) => u.username);
     const outgoing = (await db.listOutgoingRequests(req.userId)).map((u) => u.username);
     res.json({ friends, incoming, outgoing });
@@ -334,13 +422,16 @@ app.use((err, _req, res, next) => {
 
 // ---- Socket.IO (sinyalleşme + eslesme + sohbet) ----
 
-io.use((socket, next) => {
+io.use(async (socket, next) => {
   const token = socket.handshake.auth && socket.handshake.auth.token;
   if (typeof token !== 'string') return next(new Error('unauthorized'));
   try {
     const payload = jwt.verify(token, JWT_SECRET);
+    const user = await db.getUserById(payload.userId);
+    if (!user) return next(new Error('unauthorized'));
     socket.data.userId = payload.userId;
-    socket.data.username = payload.username;
+    socket.data.username = user.username;
+    socket.data.avatarId = publicAvatar(user);
     next();
   } catch {
     next(new Error('unauthorized'));
@@ -355,7 +446,7 @@ io.on('connection', (socket) => {
   let chatTimestamps = [];
 
   const cameOnline = addOnlineSocket(usernameKey, socket.id);
-  socket.emit('authenticated', { username });
+  socket.emit('authenticated', { username, avatarId: socket.data.avatarId });
   if (cameOnline) notifyFriends(userId, 'friend-online', { username }).catch((err) => console.error(err.message));
 
   function leaveCurrentRoom() {
@@ -364,15 +455,22 @@ io.on('connection', (socket) => {
     if (room) {
       room.members.delete(socket.id);
       socket.to(currentRoom).emit('peer-left', { id: socket.id });
+      if (room.ownerUserId && ownerActiveRoom.get(room.ownerUserId) === currentRoom && !isOwnerInRoom(room)) {
+        ownerActiveRoom.delete(room.ownerUserId);
+      }
       cleanupEmptyRoom(currentRoom);
+      refreshOwnerRoomStatus(room);
     }
     socket.leave(currentRoom);
     currentRoom = null;
   }
 
-  socket.on('create-room', (ack) => {
+  socket.on('create-room', (payload, ack) => {
     if (typeof ack !== 'function') return;
-    ack({ roomCode: createRoomEntry() });
+    const access = payload && payload.access === 'friends' ? 'friends' : 'invite';
+    const roomCode = createRoomEntry({ ownerUserId: userId, ownerUsername: username, type: 'room' });
+    rooms.get(roomCode).access = access;
+    ack({ roomCode });
   });
 
   socket.on('join-room', (payload, ack) => {
@@ -382,6 +480,18 @@ io.on('connection', (socket) => {
     const room = rooms.get(roomCode);
     if (!room) return ack({ error: 'oda bulunamadi' });
 
+    // Direct calls are private even when somebody knows the internal room code.
+    if (room.type === 'call') {
+      if (!room.callAccepted || !room.callUserIds?.has(userId)) {
+        return ack({ error: 'bu ozel gorusmeye katilamazsin' });
+      }
+      const otherSession = [...room.members].some((sid) => sid !== socket.id && io.sockets.sockets.get(sid)?.data.userId === userId);
+      if (otherSession) return ack({ error: 'bu gorusme baska cihazinda acik' });
+    }
+    if (currentRoom === roomCode) {
+      return ack({ ok: true, roomCode, roomType: room.type, existingPeers: [...room.members].filter((sid) => sid !== socket.id).map((id) => ({ id, displayName: io.sockets.sockets.get(id)?.data.username || 'Bilinmeyen', avatarId: io.sockets.sockets.get(id)?.data.avatarId || 'panda' })), chatHistory: room.messages, isOwner: room.ownerUserId === userId, access: room.type === 'room' ? room.access : null });
+    }
+
     leaveCurrentRoom();
     currentRoom = roomCode;
     chatTimestamps = [];
@@ -390,14 +500,63 @@ io.on('connection', (socket) => {
     const existingPeers = [...room.members].map((id) => ({
       id,
       displayName: io.sockets.sockets.get(id)?.data.username || 'Bilinmeyen',
+      avatarId: io.sockets.sockets.get(id)?.data.avatarId || 'panda',
     }));
 
     room.members.add(socket.id);
-    socket.to(roomCode).emit('peer-joined', { id: socket.id, displayName: username });
-    ack({ ok: true, roomCode, existingPeers, chatHistory: room.messages });
+    socket.to(roomCode).emit('peer-joined', { id: socket.id, displayName: username, avatarId: socket.data.avatarId });
+
+    const isOwner = room.type === 'room' && room.ownerUserId === userId;
+    if (isOwner) ownerActiveRoom.set(userId, roomCode);
+    refreshOwnerRoomStatus(room);
+
+    ack({
+      ok: true,
+      roomCode,
+      existingPeers,
+      chatHistory: room.messages,
+      roomType: room.type,
+      isOwner,
+      access: room.type === 'room' ? room.access : null,
+    });
   });
 
   socket.on('leave-room', () => leaveCurrentRoom());
+
+  socket.on('set-room-access', (payload, ack) => {
+    if (typeof ack !== 'function') ack = () => {};
+    if (!currentRoom) return ack({ error: 'bir odada degilsin' });
+    const room = rooms.get(currentRoom);
+    if (!room || room.type !== 'room' || room.ownerUserId !== userId) {
+      return ack({ error: 'sadece oda sahibi erisimi degistirebilir' });
+    }
+    const { access } = payload || {};
+    if (access !== 'invite' && access !== 'friends') return ack({ error: 'gecersiz erisim modu' });
+    room.access = access;
+    refreshOwnerRoomStatus(room);
+    ack({ ok: true, access });
+  });
+
+  socket.on('join-friend-room', (payload, ack) => {
+    if (typeof ack !== 'function') ack = () => {};
+    const { targetUsername } = payload || {};
+    if (!isValidUsername(targetUsername)) return ack({ error: 'gecersiz kullanici adi' });
+
+    (async () => {
+      const targetUser = await db.getUserByUsername(targetUsername);
+      if (!targetUser || !(await db.areFriends(userId, targetUser.id))) {
+        return ack({ error: 'bu kullaniciyla arkadas degilsiniz' });
+      }
+      const roomCode = getOpenRoomForUser(targetUser.id);
+      if (!roomCode) {
+        return ack({ error: `${targetUsername} kullanicisinin su anda acik bir odasi yok` });
+      }
+      ack({ ok: true, roomCode });
+    })().catch((err) => {
+      console.error('join-friend-room hatasi:', err.message);
+      ack({ error: 'sunucu hatasi' });
+    });
+  });
 
   socket.on('signal', (payload) => {
     const { to, data } = payload || {};
@@ -432,7 +591,7 @@ io.on('connection', (socket) => {
     }
     chatTimestamps.push(now);
 
-    const message = { id: crypto.randomUUID(), from: username, text, ts: now };
+    const message = { id: crypto.randomUUID(), from: username, avatarId: socket.data.avatarId, text, ts: now };
 
     room.messages.push(message);
     if (room.messages.length > CHAT_HISTORY_LIMIT) room.messages.shift();
@@ -454,6 +613,8 @@ io.on('connection', (socket) => {
     lastCallAttempt = now;
 
     if (!isValidUsername(toUsername)) return ack({ error: 'gecersiz kullanici adi' });
+    if (toUsername.toLowerCase() === usernameKey) return ack({ error: 'kendini arayamazsin' });
+    if (isUserBusy(usernameKey)) return ack({ error: 'once mevcut gorusmeni veya aramani bitir' });
 
     const targetSet = onlineUsers.get(toUsername.toLowerCase());
     const targetSocketId = targetSet ? [...targetSet].pop() : null;
@@ -474,7 +635,16 @@ io.on('connection', (socket) => {
         return ack({ ok: true });
       }
 
-      const roomCode = createRoomEntry();
+      // Recheck after database awaits: another caller may have won the race.
+      if (!socket.connected) return;
+      if (!io.sockets.sockets.has(targetSocketId)) return ack({ error: 'kullanici cevrimdisi' });
+      if (isUserBusy(usernameKey) || isUserBusy(toUsername.toLowerCase())) {
+        return ack({ error: 'kullanici veya sen su anda mesgulsun' });
+      }
+
+      const roomCode = createRoomEntry({ type: 'call' });
+      rooms.get(roomCode).callUserIds = new Set([userId, targetUser.id]);
+      rooms.get(roomCode).callAccepted = false;
       const timeoutHandle = startCallTimeout(roomCode);
       pendingCalls.set(roomCode, { callerSocketId: socket.id, calleeSocketId: targetSocketId, timeoutHandle });
 
@@ -487,20 +657,24 @@ io.on('connection', (socket) => {
     });
   });
 
-  socket.on('call-response', (payload) => {
+  socket.on('call-response', (payload, ack) => {
+    if (typeof ack !== 'function') ack = () => {};
     const { roomCode, accepted } = payload || {};
     const call = pendingCalls.get(roomCode);
-    if (!call || call.calleeSocketId !== socket.id) return;
+    if (!call || call.calleeSocketId !== socket.id) return ack({ error: 'arama sona ermis veya sana ait degil' });
+    if (typeof accepted !== 'boolean') return ack({ error: 'gecersiz arama cevabi' });
 
     clearTimeout(call.timeoutHandle);
     pendingCalls.delete(roomCode);
 
     if (accepted) {
+      rooms.get(roomCode).callAccepted = true;
       io.to(call.callerSocketId).emit('call-accepted', { roomCode });
     } else {
       io.to(call.callerSocketId).emit('call-declined', { byUsername: username });
       cleanupEmptyRoom(roomCode);
     }
+    ack({ ok: true });
   });
 
   socket.on('cancel-call', (payload) => {

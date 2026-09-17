@@ -45,6 +45,11 @@ const outgoingCallBanner = document.getElementById('outgoing-call-banner');
 const outgoingCallText = document.getElementById('outgoing-call-text');
 const cancelCallBtn = document.getElementById('cancel-call-btn');
 
+const switchRoomBanner = document.getElementById('switch-room-banner');
+const switchRoomText = document.getElementById('switch-room-text');
+const switchRoomConfirmBtn = document.getElementById('switch-room-confirm-btn');
+const switchRoomCancelBtn = document.getElementById('switch-room-cancel-btn');
+
 const activeCallBar = document.getElementById('active-call-bar');
 const activeCallText = document.getElementById('active-call-text');
 const returnToCallBtn = document.getElementById('return-to-call-btn');
@@ -57,6 +62,9 @@ const roomSettingsBtn = document.getElementById('room-settings-btn');
 const muteAllBtn = document.getElementById('mute-all-btn');
 const participantsList = document.getElementById('participants');
 const micIndicator = document.getElementById('mic-indicator');
+const roomAccessSection = document.getElementById('room-access-section');
+const roomAccessRadios = document.querySelectorAll('input[name="room-access"]');
+const createRoomAccessRadios = document.querySelectorAll('input[name="create-room-access"]');
 
 const chatLogEl = document.getElementById('chat-log');
 const chatScrollBtn = document.getElementById('chat-scroll-btn');
@@ -75,6 +83,15 @@ const micLevelBar = document.getElementById('mic-level-bar');
 const micTestBtn = document.getElementById('mic-test-btn');
 const themeRadios = document.querySelectorAll('input[name="theme-select"]');
 
+const notifyCallCheckbox = document.getElementById('notify-call-checkbox');
+const ringtoneEnabledCheckbox = document.getElementById('ringtone-enabled-checkbox');
+const ringtoneVolumeRow = document.getElementById('ringtone-volume-row');
+const ringtoneVolumeSlider = document.getElementById('ringtone-volume-slider');
+const notifyFriendCheckbox = document.getElementById('notify-friend-checkbox');
+const notifyChatCheckbox = document.getElementById('notify-chat-checkbox');
+const notifyChatContentCheckbox = document.getElementById('notify-chat-content-checkbox');
+const runInBackgroundCheckbox = document.getElementById('run-in-background-checkbox');
+
 const PTT_KEY_OPTIONS = window.api?.pttKeyOptions || ['Space'];
 const VALID_THEMES = ['terminal', 'newsprint'];
 
@@ -84,7 +101,11 @@ let muted = false;
 let iceServers = DEFAULT_ICE_SERVERS;
 let pendingIncomingCall = null;
 let currentOutgoingCall = null;
+let callRequestPending = false;
+let currentRoomType = 'room';
 let currentRoomCode = null;
+let currentRoomIsOwner = false;
+let pendingRoomSwitch = null;
 let joining = false;
 let lastCallAttemptAt = 0;
 let audioContext = null;
@@ -167,6 +188,13 @@ function getSettings() {
     vadSensitivity: Number(localStorage.getItem('vadSensitivity') || '50'),
     micDeviceId: localStorage.getItem('micDeviceId') || '',
     speakerDeviceId: localStorage.getItem('speakerDeviceId') || '',
+    runInBackground: localStorage.getItem('runInBackground') === 'true',
+    notifyIncomingCall: localStorage.getItem('notifyIncomingCall') !== 'false',
+    notifyFriendRequest: localStorage.getItem('notifyFriendRequest') !== 'false',
+    notifyChatMessage: localStorage.getItem('notifyChatMessage') === 'true',
+    notifyChatContent: localStorage.getItem('notifyChatContent') === 'true',
+    ringtoneEnabled: localStorage.getItem('ringtoneEnabled') !== 'false',
+    ringtoneVolume: Number(localStorage.getItem('ringtoneVolume') ?? '70'),
   };
 }
 
@@ -202,7 +230,7 @@ function showScreen(screen) {
 function updateActiveCallBar() {
   const inRoomScreen = !roomScreen.classList.contains('hidden');
   activeCallBar.classList.toggle('hidden', !currentRoomCode || inRoomScreen);
-  if (currentRoomCode) activeCallText.textContent = `GÖRÜŞME DEVAM EDİYOR (${currentRoomCode})`;
+  if (currentRoomCode) activeCallText.textContent = currentRoomType === 'call' ? 'ÖZEL GÖRÜŞME DEVAM EDİYOR' : `GÖRÜŞME DEVAM EDİYOR (${currentRoomCode})`;
 }
 
 // ---- kimlik dogrulama ----
@@ -235,6 +263,7 @@ async function authRequest(endpoint) {
 }
 
 function enterJoinScreen(username) {
+  profileAvatars.setAccount(username);
   setAuthStatus('');
   welcomeText.textContent = `[OK] oturum açıldı: ${username}`;
   profileUsernameEl.textContent = `kullanıcı: ${username}`;
@@ -254,8 +283,8 @@ function logout() {
   clearSession();
   authUsernameInput.value = '';
   authPasswordInput.value = '';
-  incomingCallBanner.classList.add('hidden');
-  outgoingCallBanner.classList.add('hidden');
+  hideIncomingCall();
+  hideOutgoingCall();
   showScreen(authScreen);
 }
 
@@ -293,6 +322,10 @@ function updateModeVisibility() {
   pttSettingsSection.classList.toggle('hidden', mode !== 'ptt');
 }
 
+function updateRingtoneVisibility() {
+  ringtoneVolumeRow.classList.toggle('hidden', !getSettings().ringtoneEnabled);
+}
+
 function initSettingsTab() {
   const currentTheme = getTheme();
   themeRadios.forEach((radio) => {
@@ -314,6 +347,15 @@ function initSettingsTab() {
     });
   }
   pttKeySelect.value = settings.pttKey;
+
+  notifyCallCheckbox.checked = settings.notifyIncomingCall;
+  ringtoneEnabledCheckbox.checked = settings.ringtoneEnabled;
+  ringtoneVolumeSlider.value = settings.ringtoneVolume;
+  notifyFriendCheckbox.checked = settings.notifyFriendRequest;
+  notifyChatCheckbox.checked = settings.notifyChatMessage;
+  notifyChatContentCheckbox.checked = settings.notifyChatContent;
+  runInBackgroundCheckbox.checked = settings.runInBackground;
+  updateRingtoneVisibility();
 
   updateModeVisibility();
   populateDeviceLists();
@@ -542,7 +584,7 @@ function toggleMute() {
 // ---- oda kodu / pano ----
 
 function copyRoomCode() {
-  if (!currentRoomCode) return;
+  if (!currentRoomCode || currentRoomType === 'call') return;
   if (window.api) window.api.copyToClipboard(currentRoomCode);
   showToast('oda kodu panoya kopyalandı', 'ok', 2500);
 }
@@ -618,6 +660,7 @@ function renderFriends(friends, incoming, outgoing) {
   friendsListEl.innerHTML = '';
   friendsEmptyEl.classList.toggle('hidden', friends.length > 0);
   for (const friend of friends) {
+    profileAvatars.remember(friend.username, friend.avatarId);
     const li = document.createElement('li');
     li.className = 'friend-row';
     li.dataset.username = friend.username.toLowerCase();
@@ -626,16 +669,33 @@ function renderFriends(friends, incoming, outgoing) {
     const name = document.createElement('span');
     name.className = 'name';
     name.textContent = friend.username;
-    const callBtn = document.createElement('button');
-    callBtn.className = 'btn call-btn';
-    callBtn.textContent = '[ ARA ]';
-    callBtn.disabled = !friend.online || !!currentOutgoingCall;
-    callBtn.onclick = () => callFriend(friend.username);
+
+    if (friend.roomOpen) {
+      const statusLabel = document.createElement('span');
+      statusLabel.className = 'friend-room-status';
+      statusLabel.textContent = 'odada';
+      const joinRoomBtn = document.createElement('button');
+      joinRoomBtn.className = 'btn join-room-friend-btn';
+      joinRoomBtn.textContent = '[ KATIL ]';
+      joinRoomBtn.disabled = !friend.online;
+      joinRoomBtn.onclick = () => joinFriendRoom(friend.username);
+      li.append(dot, name, statusLabel, joinRoomBtn);
+    } else {
+      const callBtn = document.createElement('button');
+      callBtn.className = 'btn call-btn';
+      callBtn.textContent = '[ ARA ]';
+      callBtn.disabled = !friend.online || !!currentOutgoingCall;
+      callBtn.onclick = () => callFriend(friend.username);
+      li.append(dot, name, callBtn);
+    }
+
     const removeBtn = document.createElement('button');
     removeBtn.className = 'btn btn-ghost';
     removeBtn.textContent = '[ SİL ]';
     removeBtn.onclick = () => removeFriend(friend.username);
-    li.append(dot, name, callBtn, removeBtn);
+    li.append(removeBtn);
+    li.prepend(profileAvatars.image(friend.username));
+
     friendsListEl.appendChild(li);
   }
 }
@@ -692,26 +752,87 @@ function setCallButtonsEnabled(enabled) {
   });
 }
 
-function callFriend(toUsername) {
-  if (!socket || currentOutgoingCall) return;
+async function callFriend(toUsername) {
+  if (!socket?.connected) return showToast('Aramak için sunucuya bağlı olmalısın.', 'error');
+  if (currentOutgoingCall || callRequestPending || pendingIncomingCall || joining) return;
+  if (currentRoomCode) return showToast('Özel arama başlatmadan önce mevcut görüşmeden ayrıl.', 'info');
   const now = Date.now();
   if (now - lastCallAttemptAt < CALL_COOLDOWN_MS) return;
   lastCallAttemptAt = now;
 
-  socket.emit('call-friend', { toUsername }, (ack) => {
-    if (ack && ack.error) showToast(ack.error, 'error');
-  });
+  callRequestPending = true;
+  setCallButtonsEnabled(false);
+  try {
+    const ack = await emitWithTimeout('call-friend', { toUsername });
+    if (ack?.error) showToast(ack.error, 'error');
+  } finally {
+    callRequestPending = false;
+    setCallButtonsEnabled(!currentOutgoingCall);
+  }
+}
+
+// ---- gelen arama zili ----
+// Harici bir ses dosyasi kullanilmiyor; ton dogrudan Web Audio ile uretilir.
+// Ayni cagri icin zil ust uste baslatilamaz (ringtoneCtx varsa yeni cagri yoksayilir).
+
+let ringtoneCtx = null;
+let ringtoneGain = null;
+let ringtoneTimer = null;
+
+function startRingtone() {
+  const settings = getSettings();
+  if (!settings.ringtoneEnabled || ringtoneCtx) return;
+  try {
+    ringtoneCtx = new AudioContext();
+  } catch {
+    ringtoneCtx = null;
+    return;
+  }
+  ringtoneGain = ringtoneCtx.createGain();
+  ringtoneGain.gain.value = Math.max(0, Math.min(1, settings.ringtoneVolume / 100));
+  ringtoneGain.connect(ringtoneCtx.destination);
+
+  const ringOnce = () => {
+    if (!ringtoneCtx) return;
+    const now = ringtoneCtx.currentTime;
+    [480, 620].forEach((freq) => {
+      const osc = ringtoneCtx.createOscillator();
+      osc.type = 'sine';
+      osc.frequency.value = freq;
+      osc.connect(ringtoneGain);
+      osc.start(now);
+      osc.stop(now + 0.4);
+    });
+  };
+  ringOnce();
+  ringtoneTimer = setInterval(ringOnce, 1200);
+}
+
+function stopRingtone() {
+  if (ringtoneTimer) {
+    clearInterval(ringtoneTimer);
+    ringtoneTimer = null;
+  }
+  if (ringtoneCtx) {
+    ringtoneCtx.close().catch(() => {});
+    ringtoneCtx = null;
+  }
+  ringtoneGain = null;
 }
 
 function showIncomingCall(fromUsername, roomCode) {
   pendingIncomingCall = { fromUsername, roomCode };
   incomingCallText.textContent = `${fromUsername} seni arıyor`;
   incomingCallBanner.classList.remove('hidden');
+  startRingtone();
 }
 
 function hideIncomingCall() {
+  const roomCode = pendingIncomingCall?.roomCode;
   pendingIncomingCall = null;
   incomingCallBanner.classList.add('hidden');
+  stopRingtone();
+  if (roomCode && window.api) window.api.clearCallNotification(roomCode);
 }
 
 function showOutgoingCall(toUsername, roomCode) {
@@ -725,6 +846,17 @@ function hideOutgoingCall() {
   currentOutgoingCall = null;
   outgoingCallBanner.classList.add('hidden');
   setCallButtonsEnabled(true);
+}
+
+function updateDirectCallUI(roomType = 'room') {
+  currentRoomType = roomType;
+  const privateCall = roomType === 'call';
+  const row = roomCodeDisplay.closest('.room-code-row');
+  const label = row?.querySelector('.prompt');
+  if (label) label.textContent = privateCall ? 'Özel görüşme:' : 'oda kodu:';
+  roomCodeDisplay.textContent = privateCall ? 'Birebir arama' : currentRoomCode;
+  copyCodeBtn.classList.toggle('hidden', privateCall);
+  leaveBtn.textContent = privateCall ? '[ ARAMAYI BİTİR ]' : '[ ODADAN AYRIL ]';
 }
 
 // ---- WebRTC eslesme ----
@@ -900,6 +1032,7 @@ function renderParticipants() {
   const me = document.createElement('li');
   me.className = 'participant-row';
   me.innerHTML = `<span class="name own-name">${myUsername} (sen)</span>`;
+  me.prepend(profileAvatars.image(myUsername));
   participantsList.appendChild(me);
 
   for (const [id, name] of Object.entries(participantNames)) {
@@ -933,12 +1066,13 @@ function renderParticipants() {
       muteOneBtn.textContent = audio.muted ? '[ SESİ AÇ ]' : '[ SUSTUR ]';
     };
 
-    li.append(nameSpan, vol, muteOneBtn);
+    li.append(profileAvatars.image(name), nameSpan, vol, muteOneBtn);
     participantsList.appendChild(li);
   }
 }
 
-function addParticipant(id, name) {
+function addParticipant(id, name, avatarId) {
+  profileAvatars.remember(name, avatarId);
   participantNames[id] = name;
   renderParticipants();
 }
@@ -998,6 +1132,7 @@ function renderChatLog() {
     if (m.pending) metaText += ' · gönderiliyor...';
     if (m.failed) metaText += ' · başarısız';
     meta.textContent = metaText;
+    meta.prepend(profileAvatars.image(m.from, m.avatarId));
 
     const text = document.createElement('div');
     text.className = 'text';
@@ -1109,14 +1244,60 @@ async function acquireMicStream() {
   }
 }
 
-function joinRoomAck(roomCode) {
+// socket.emit + ack cevabini zaman asimiyla bekler; sunucu hic yanit
+// vermezse (baglanti sorunu vb.) 'joining' kilidinde sonsuza kadar takili
+// kalmayi engeller.
+function emitWithTimeout(event, payload, timeoutMs = 8000) {
   return new Promise((resolve) => {
-    socket.emit('join-room', { roomCode }, resolve);
+    if (!socket) return resolve({ error: 'baglanti yok' });
+    let settled = false;
+    const timer = setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      resolve({ error: 'zaman aşımı, tekrar dene' });
+    }, timeoutMs);
+    socket.emit(event, payload, (ack) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      resolve(ack);
+    });
   });
 }
 
-async function enterRoom(roomCode, stream) {
+function joinRoomAck(roomCode) {
+  return emitWithTimeout('join-room', { roomCode });
+}
+
+// Onceki oda/mikrofon durumunu (varsa) guvenli bicimde temizler: sunucuya
+// ayrilma bildirir, WebRTC baglantilarini/ses elemanlarini kapatir ve eski
+// mikrofon akisini durdurur. Boylece oda degistirirken hayalet katilimci
+// veya acik kalan mikrofon birakmaz.
+function teardownCurrentRoomState() {
+  if (socket && currentRoomCode) socket.emit('leave-room');
   cleanupAllPeers();
+  stopVoiceActivation();
+  if (localStream) {
+    localStream.getTracks().forEach((t) => t.stop());
+    localStream = null;
+  }
+  currentRoomCode = null;
+  currentRoomIsOwner = false;
+  updateActiveCallBar();
+}
+
+function updateRoomAccessUI(isOwner, access) {
+  currentRoomIsOwner = !!isOwner;
+  roomAccessSection.classList.toggle('hidden', !currentRoomIsOwner);
+  if (currentRoomIsOwner) {
+    roomAccessRadios.forEach((r) => {
+      r.checked = r.value === access;
+    });
+  }
+}
+
+async function enterRoom(roomCode, stream) {
+  teardownCurrentRoomState();
   resetChat();
   localStream = stream;
   muted = false;
@@ -1124,21 +1305,25 @@ async function enterRoom(roomCode, stream) {
   const result = await joinRoomAck(roomCode);
   if (!result || result.error) {
     showToast(result?.error || 'odaya katılınamadı', 'error');
-    localStream.getTracks().forEach((t) => t.stop());
-    localStream = null;
+    if (localStream) {
+      localStream.getTracks().forEach((t) => t.stop());
+      localStream = null;
+    }
     joining = false;
     return false;
   }
 
   currentRoomCode = roomCode;
   roomCodeDisplay.textContent = roomCode;
+  updateDirectCallUI(result.roomType);
   showScreen(roomScreen);
   renderParticipants();
   applyChatHistory(result.chatHistory);
+  updateRoomAccessUI(result.isOwner, result.access);
   applyMicMode();
 
   for (const peer of result.existingPeers) {
-    addParticipant(peer.id, peer.displayName);
+    addParticipant(peer.id, peer.displayName, peer.avatarId);
     await callPeer(peer.id);
   }
 
@@ -1169,9 +1354,11 @@ function joinRoom() {
 async function createRoom() {
   if (joining || !socket) return;
   joining = true;
-  const ack = await new Promise((resolve) => socket.emit('create-room', resolve));
+  const selected = document.querySelector('input[name="create-room-access"]:checked');
+  const access = selected && selected.value === 'friends' ? 'friends' : 'invite';
+  const ack = await emitWithTimeout('create-room', { access });
   if (!ack || !ack.roomCode) {
-    showToast('oda oluşturulamadı', 'error');
+    showToast(ack?.error || 'oda oluşturulamadı', 'error');
     joining = false;
     return;
   }
@@ -1179,18 +1366,54 @@ async function createRoom() {
   await joinRoomWithCode(ack.roomCode);
 }
 
+// ---- arkadas odasina onaysiz katilim ----
+
+function joinFriendRoom(targetUsername) {
+  if (joining) return;
+  if (currentRoomCode) {
+    pendingRoomSwitch = targetUsername;
+    switchRoomText.textContent = `Mevcut görüşmeden ayrılıp ${targetUsername} kullanıcısının odasına katılacaksın.`;
+    switchRoomBanner.classList.remove('hidden');
+    return;
+  }
+  performJoinFriendRoom(targetUsername);
+}
+
+async function performJoinFriendRoom(targetUsername) {
+  if (joining) return;
+  joining = true;
+  setFriendRowsBusy(true);
+
+  const ack = await emitWithTimeout('join-friend-room', { targetUsername });
+  if (!ack || ack.error) {
+    showToast(ack?.error || 'odaya katılınamadı', 'error');
+    joining = false;
+    setFriendRowsBusy(false);
+    return;
+  }
+
+  joining = false;
+  const roomCode = ack.roomCode;
+  const stream = await acquireMicStream();
+  if (!stream) {
+    setFriendRowsBusy(false);
+    return;
+  }
+  await enterRoom(roomCode, stream);
+  setFriendRowsBusy(false);
+}
+
+function setFriendRowsBusy(busy) {
+  friendsListEl.querySelectorAll('button').forEach((btn) => {
+    btn.disabled = busy || btn.disabled;
+  });
+  if (!busy) loadFriends();
+}
+
 function fullyLeaveRoom() {
-  if (socket && currentRoomCode) socket.emit('leave-room');
-  cleanupAllPeers();
-  stopVoiceActivation();
+  teardownCurrentRoomState();
   resetChat();
   if (window.api) window.api.unregisterPttShortcut();
-  if (localStream) {
-    localStream.getTracks().forEach((t) => t.stop());
-    localStream = null;
-  }
-  currentRoomCode = null;
-  updateActiveCallBar();
 }
 
 function leaveRoom() {
@@ -1216,14 +1439,19 @@ function connectSocket() {
     }
   });
 
-  socket.on('authenticated', () => {
+  socket.on('authenticated', ({ username, avatarId }) => {
+    profileAvatars.setAccount(username, avatarId);
     loadFriends();
+  });
+  socket.on('profile-updated', ({ username, avatarId }) => {
+    profileAvatars.remember(username, avatarId);
   });
 
   socket.on('disconnect', () => {
     if (currentRoomCode) {
       showToast('sunucu bağlantısı koptu, yeniden bağlanılıyor...', 'error', 0);
     }
+    if (pendingIncomingCall) hideIncomingCall();
   });
 
   socket.on('connect_error', (err) => {
@@ -1237,8 +1465,14 @@ function connectSocket() {
 
   socket.on('friend-online', ({ username }) => setFriendOnline(username, true));
   socket.on('friend-offline', ({ username }) => setFriendOnline(username, false));
-  socket.on('friend-request', () => loadFriends());
+  socket.on('friend-request', ({ fromUsername } = {}) => {
+    loadFriends();
+    if (fromUsername && window.api && getSettings().notifyFriendRequest) {
+      window.api.notifyFriendRequest({ fromUsername });
+    }
+  });
   socket.on('friend-accepted', () => loadFriends());
+  socket.on('friend-room-status', () => loadFriends());
 
   socket.on('incoming-call', ({ fromUsername, roomCode }) => {
     if (pendingIncomingCall || currentRoomCode) {
@@ -1246,6 +1480,9 @@ function connectSocket() {
       return;
     }
     showIncomingCall(fromUsername, roomCode);
+    if (window.api && getSettings().notifyIncomingCall) {
+      window.api.notifyIncomingCall({ fromUsername, roomCode });
+    }
   });
 
   socket.on('call-ringing', ({ toUsername, roomCode }) => showOutgoingCall(toUsername, roomCode));
@@ -1273,19 +1510,23 @@ function connectSocket() {
 
   socket.on('call-cancelled', ({ roomCode }) => {
     if (pendingIncomingCall && pendingIncomingCall.roomCode === roomCode) {
-      showToast(`${pendingIncomingCall.fromUsername} aramayı iptal etti`, 'info');
+      showToast('Arama sona erdi.', 'info');
       hideIncomingCall();
     }
   });
 
-  socket.on('peer-joined', ({ id, displayName }) => {
-    addParticipant(id, displayName);
+  socket.on('peer-joined', ({ id, displayName, avatarId }) => {
+    addParticipant(id, displayName, avatarId);
   });
 
   socket.on('signal', handleSignal);
 
   socket.on('peer-left', ({ id }) => {
     cleanupPeer(id);
+    if (currentRoomType === 'call' && currentRoomCode) {
+      leaveRoom();
+      showToast('Karşı taraf görüşmeden ayrıldı.', 'info');
+    }
   });
 
   socket.on('chat-message', (message) => {
@@ -1294,23 +1535,18 @@ function connectSocket() {
     chatMessages.push({ ...message, own: false });
     trimChatMessages();
     renderChatLog();
+
+    const settings = getSettings();
+    if (window.api && settings.notifyChatMessage && currentRoomCode) {
+      window.api.notifyChatMessage({
+        roomCode: currentRoomCode,
+        fromUsername: message.from,
+        text: message.text,
+        showContent: settings.notifyChatContent,
+      });
+    }
   });
 
-  if (window.api) {
-    window.api.onPttToggle(() => {
-      if (getSettings().micMode !== 'ptt' || !localStream) return;
-      pttToggleState = !pttToggleState;
-      applyTrackEnabledState(pttToggleState);
-    });
-    window.api.onPttRegisterResult(({ success, key }) => {
-      if (!success) {
-        pttKeyStatusEl.textContent = `[ERROR] ${key} tuşu başka bir uygulama tarafından kullanılıyor, başka tuş seç`;
-        pttKeyStatusEl.className = 'status-line error';
-      } else {
-        pttKeyStatusEl.textContent = '';
-      }
-    });
-  }
 }
 
 async function rejoinAfterReconnect() {
@@ -1326,7 +1562,7 @@ async function rejoinAfterReconnect() {
   renderParticipants();
   applyChatHistory(result.chatHistory);
   for (const peer of result.existingPeers) {
-    addParticipant(peer.id, peer.displayName);
+    addParticipant(peer.id, peer.displayName, peer.avatarId);
     await callPeer(peer.id);
   }
 }
@@ -1340,6 +1576,32 @@ function setFriendOnline(username, online) {
 }
 
 // ---- olay dinleyicileri ----
+// window.api dinleyicileri burada, uygulama omru boyunca yalnizca bir kez
+// baglanir; connectSocket() oturum degisiminde/yeniden baglanmada tekrar
+// tekrar cagrildigi icin dinleyiciler orada birikip cift bildirime yol acar.
+
+if (window.api) {
+  window.api.onPttToggle(() => {
+    if (getSettings().micMode !== 'ptt' || !localStream) return;
+    pttToggleState = !pttToggleState;
+    applyTrackEnabledState(pttToggleState);
+  });
+  window.api.onPttRegisterResult(({ success, key }) => {
+    if (!success) {
+      pttKeyStatusEl.textContent = `[ERROR] ${key} tuşu başka bir uygulama tarafından kullanılıyor, başka tuş seç`;
+      pttKeyStatusEl.className = 'status-line error';
+    } else {
+      pttKeyStatusEl.textContent = '';
+    }
+  });
+  window.api.onNotificationFriendRequestClicked(() => {
+    showScreen(joinScreen);
+    showTab('friends');
+  });
+  window.api.onNotificationChatClicked(({ roomCode } = {}) => {
+    if (roomCode && currentRoomCode === roomCode) showScreen(roomScreen);
+  });
+}
 
 loginBtn.addEventListener('click', () => authRequest('/api/login'));
 registerBtn.addEventListener('click', () => authRequest('/api/register'));
@@ -1414,6 +1676,36 @@ themeRadios.forEach((radio) => {
   });
 });
 
+roomAccessRadios.forEach((radio) => {
+  radio.addEventListener('change', () => {
+    if (!radio.checked || !socket || !currentRoomCode || !currentRoomIsOwner) return;
+    const access = radio.value;
+    emitWithTimeout('set-room-access', { access }).then((ack) => {
+      if (!ack || ack.error) {
+        showToast(ack?.error || 'erişim değiştirilemedi', 'error');
+        return;
+      }
+      showToast(
+        access === 'friends' ? 'oda arkadaşlarına açıldı' : 'oda yalnızca davetle erişilebilir',
+        'ok',
+        3000
+      );
+    });
+  });
+});
+
+switchRoomConfirmBtn.addEventListener('click', () => {
+  const target = pendingRoomSwitch;
+  pendingRoomSwitch = null;
+  switchRoomBanner.classList.add('hidden');
+  if (target) performJoinFriendRoom(target);
+});
+
+switchRoomCancelBtn.addEventListener('click', () => {
+  pendingRoomSwitch = null;
+  switchRoomBanner.classList.add('hidden');
+});
+
 vadSensitivitySlider.addEventListener('input', () => {
   saveSetting('vadSensitivity', vadSensitivitySlider.value);
 });
@@ -1421,6 +1713,36 @@ vadSensitivitySlider.addEventListener('input', () => {
 pttKeySelect.addEventListener('change', () => {
   saveSetting('pttKey', pttKeySelect.value);
   updatePttRegistration();
+});
+
+notifyCallCheckbox.addEventListener('change', () => {
+  saveSetting('notifyIncomingCall', notifyCallCheckbox.checked);
+});
+
+ringtoneEnabledCheckbox.addEventListener('change', () => {
+  saveSetting('ringtoneEnabled', ringtoneEnabledCheckbox.checked);
+  updateRingtoneVisibility();
+});
+
+ringtoneVolumeSlider.addEventListener('input', () => {
+  saveSetting('ringtoneVolume', ringtoneVolumeSlider.value);
+});
+
+notifyFriendCheckbox.addEventListener('change', () => {
+  saveSetting('notifyFriendRequest', notifyFriendCheckbox.checked);
+});
+
+notifyChatCheckbox.addEventListener('change', () => {
+  saveSetting('notifyChatMessage', notifyChatCheckbox.checked);
+});
+
+notifyChatContentCheckbox.addEventListener('change', () => {
+  saveSetting('notifyChatContent', notifyChatContentCheckbox.checked);
+});
+
+runInBackgroundCheckbox.addEventListener('change', () => {
+  saveSetting('runInBackground', runInBackgroundCheckbox.checked);
+  if (window.api) window.api.setBackgroundPref(runInBackgroundCheckbox.checked);
 });
 
 acceptCallBtn.addEventListener('click', async () => {
@@ -1434,7 +1756,13 @@ acceptCallBtn.addEventListener('click', async () => {
     socket.emit('call-response', { roomCode, accepted: false });
     return;
   }
-  socket.emit('call-response', { roomCode, accepted: true });
+  const response = await emitWithTimeout('call-response', { roomCode, accepted: true });
+  if (!response?.ok) {
+    stream.getTracks().forEach((track) => track.stop());
+    joining = false;
+    showToast(response?.error || 'Arama artık geçerli değil.', 'error');
+    return;
+  }
   await enterRoom(roomCode, stream);
 });
 
@@ -1468,6 +1796,8 @@ roomCodeInput.addEventListener('keydown', (e) => {
 // sadece localStorage'daki degeri (gecersizse) kalici olarak duzeltiyoruz ve
 // ayarlar sekmesindeki radyo butonlarini senkronize ediyoruz.
 applyTheme(getTheme());
+
+if (window.api) window.api.setBackgroundPref(getSettings().runInBackground);
 
 const existingSession = getSession();
 if (existingSession.token && existingSession.username) {

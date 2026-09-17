@@ -4,7 +4,7 @@ const path = require('node:path');
 const fs = require('node:fs');
 const { io: ioClient } = require('socket.io-client');
 
-const TEST_PORT = 3211;
+const TEST_PORT = Number(process.env.ALO_TEST_PORT || 3211);
 const TEST_DB = path.join(__dirname, `.test-${process.pid}.db`);
 
 process.env.JWT_SECRET = 'test-secret-only-for-automated-tests';
@@ -76,7 +76,7 @@ test('sinyal mesaji sadece ayni odadaki alicilara iletilir', async () => {
   const s3 = connectSocket(u3.body.token);
   await Promise.all([waitFor(s1, 'authenticated'), waitFor(s2, 'authenticated'), waitFor(s3, 'authenticated')]);
 
-  const { roomCode } = await new Promise((resolve) => s1.emit('create-room', resolve));
+  const { roomCode } = await new Promise((resolve) => s1.emit('create-room', {}, resolve));
   const join1 = await new Promise((resolve) => s1.emit('join-room', { roomCode }, resolve));
   const join2 = await new Promise((resolve) => s2.emit('join-room', { roomCode }, resolve));
   assert.ok(join1.ok && join2.ok);
@@ -152,11 +152,11 @@ test('oda degistirince eski odadaki katilimcilar peer-left bildirimi alir', asyn
   const s2 = connectSocket(u2.body.token);
   await Promise.all([waitFor(s1, 'authenticated'), waitFor(s2, 'authenticated')]);
 
-  const { roomCode: roomA } = await new Promise((resolve) => s1.emit('create-room', resolve));
+  const { roomCode: roomA } = await new Promise((resolve) => s1.emit('create-room', {}, resolve));
   await new Promise((resolve) => s1.emit('join-room', { roomCode: roomA }, resolve));
   await new Promise((resolve) => s2.emit('join-room', { roomCode: roomA }, resolve));
 
-  const { roomCode: roomB } = await new Promise((resolve) => s1.emit('create-room', resolve));
+  const { roomCode: roomB } = await new Promise((resolve) => s1.emit('create-room', {}, resolve));
   const leftPromise = waitFor(s2, 'peer-left');
   await new Promise((resolve) => s1.emit('join-room', { roomCode: roomB }, resolve));
 
@@ -226,7 +226,7 @@ test('sohbet: ayni odadakiler mesajlasabilir, farkli oda goremez, yetkisiz gonde
   const sOutsider = connectSocket(outsider.body.token);
   await Promise.all([waitFor(s1, 'authenticated'), waitFor(s2, 'authenticated'), waitFor(sOutsider, 'authenticated')]);
 
-  const { roomCode } = await new Promise((resolve) => s1.emit('create-room', resolve));
+  const { roomCode } = await new Promise((resolve) => s1.emit('create-room', {}, resolve));
   await new Promise((resolve) => s1.emit('join-room', { roomCode }, resolve));
   await new Promise((resolve) => s2.emit('join-room', { roomCode }, resolve));
 
@@ -263,7 +263,7 @@ test('sohbet: ayni odadakiler mesajlasabilir, farkli oda goremez, yetkisiz gonde
   // farkli oda, bu odanin mesajlarini gormemeli (baska bir socket ile ayri oda)
   const s3 = connectSocket(outsider.body.token);
   await waitFor(s3, 'authenticated');
-  const { roomCode: otherRoom } = await new Promise((resolve) => s3.emit('create-room', resolve));
+  const { roomCode: otherRoom } = await new Promise((resolve) => s3.emit('create-room', {}, resolve));
   await new Promise((resolve) => s3.emit('join-room', { roomCode: otherRoom }, resolve));
 
   let leaked = false;
@@ -279,7 +279,7 @@ test('sohbet: hiz siniri asilinca mesaj reddedilir', async () => {
   const u1 = await register(uniqueUsername('chatrate'), 'password1');
   const s1 = connectSocket(u1.body.token);
   await waitFor(s1, 'authenticated');
-  const { roomCode } = await new Promise((resolve) => s1.emit('create-room', resolve));
+  const { roomCode } = await new Promise((resolve) => s1.emit('create-room', {}, resolve));
   await new Promise((resolve) => s1.emit('join-room', { roomCode }, resolve));
 
   let lastResult;
@@ -300,12 +300,12 @@ test('sohbet: oda degistirince gecmis temizlenir, yeni katilan gecmisi ack ile a
   const s2 = connectSocket(u2.body.token);
   await Promise.all([waitFor(s1, 'authenticated'), waitFor(s2, 'authenticated')]);
 
-  const { roomCode: roomA } = await new Promise((resolve) => s1.emit('create-room', resolve));
+  const { roomCode: roomA } = await new Promise((resolve) => s1.emit('create-room', {}, resolve));
   await new Promise((resolve) => s1.emit('join-room', { roomCode: roomA }, resolve));
   await new Promise((resolve) => s1.emit('chat-message', { text: 'roomA mesaji', clientMessageId: 'hist-1' }, resolve));
 
   // s1 baska bir odaya gecer, roomA bosalir ve gecmisi silinir
-  const { roomCode: roomB } = await new Promise((resolve) => s1.emit('create-room', resolve));
+  const { roomCode: roomB } = await new Promise((resolve) => s1.emit('create-room', {}, resolve));
   await new Promise((resolve) => s1.emit('join-room', { roomCode: roomB }, resolve));
 
   // s2 simdi roomA'ya katilsin - artik kimse yoktu, oda ve gecmisi silinmis olmali (yeni bos oda)
@@ -318,4 +318,215 @@ test('sohbet: oda degistirince gecmis temizlenir, yeni katilan gecmisi ack ile a
   assert.deepEqual(joinRoomBResult.chatHistory, []);
 
   s1.close(); s2.close();
+});
+
+// ---- arkadas listesinden onaysiz oda katilimi ----
+
+async function makeFriends(a, b) {
+  await fetch(`${BASE}/api/friends/request`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${a.token}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ username: b.username }),
+  });
+  await fetch(`${BASE}/api/friends/accept`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${b.token}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ username: a.username }),
+  });
+}
+
+async function removeFriendship(a, b) {
+  await fetch(`${BASE}/api/friends/remove`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${a.token}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ username: b.username }),
+  });
+}
+
+test('arkadas odasi: sahibin arkadasi acik odaya onaysiz katilabilir', async () => {
+  const owner = (await register(uniqueUsername('fro'), 'password1')).body;
+  const friend = (await register(uniqueUsername('frf'), 'password1')).body;
+  await makeFriends(owner, friend);
+
+  const sOwner = connectSocket(owner.token);
+  const sFriend = connectSocket(friend.token);
+  await Promise.all([waitFor(sOwner, 'authenticated'), waitFor(sFriend, 'authenticated')]);
+
+  const { roomCode } = await new Promise((resolve) => sOwner.emit('create-room', { access: 'friends' }, resolve));
+  const joinAck = await new Promise((resolve) => sOwner.emit('join-room', { roomCode }, resolve));
+  assert.ok(joinAck.ok && joinAck.isOwner && joinAck.access === 'friends');
+
+  // arkadas listesi REST uzerinden de "odada" gormeli
+  const friendsRes = await fetch(`${BASE}/api/friends`, { headers: { Authorization: `Bearer ${friend.token}` } });
+  const friendsBody = await friendsRes.json();
+  assert.equal(friendsBody.friends.find((f) => f.username === owner.username)?.roomOpen, true);
+
+  // gercek zamanli bildirim de gelmis olmali (join sirasinda tetiklendi)
+  const directJoinAck = await new Promise((resolve) => sFriend.emit('join-friend-room', { targetUsername: owner.username }, resolve));
+  assert.ok(directJoinAck.ok, `beklenmeyen hata: ${directJoinAck.error}`);
+  assert.equal(directJoinAck.roomCode, roomCode);
+
+  // donen kod ile gercekten (onay/oda kodu istemeden) odaya girebiliyor mu?
+  const finalJoin = await new Promise((resolve) => sFriend.emit('join-room', { roomCode: directJoinAck.roomCode }, resolve));
+  assert.ok(finalJoin.ok);
+
+  sOwner.close(); sFriend.close();
+});
+
+test('arkadas odasi: arkadas olmayan ve baska katilimcinin arkadasi dogrudan katilamaz', async () => {
+  const owner = (await register(uniqueUsername('fro2'), 'password1')).body;
+  const friend = (await register(uniqueUsername('frf2'), 'password1')).body;
+  const stranger = (await register(uniqueUsername('frs2'), 'password1')).body;
+  const participantFriend = (await register(uniqueUsername('frpf2'), 'password1')).body;
+  await makeFriends(owner, friend);
+  await makeFriends(friend, participantFriend); // participantFriend, ODA SAHIBI degil katilimci olan friend'in arkadasi
+
+  const sOwner = connectSocket(owner.token);
+  const sFriend = connectSocket(friend.token);
+  const sStranger = connectSocket(stranger.token);
+  const sParticipantFriend = connectSocket(participantFriend.token);
+  await Promise.all([
+    waitFor(sOwner, 'authenticated'),
+    waitFor(sFriend, 'authenticated'),
+    waitFor(sStranger, 'authenticated'),
+    waitFor(sParticipantFriend, 'authenticated'),
+  ]);
+
+  const { roomCode } = await new Promise((resolve) => sOwner.emit('create-room', { access: 'friends' }, resolve));
+  await new Promise((resolve) => sOwner.emit('join-room', { roomCode }, resolve));
+  // friend (sahibin gercek arkadasi) odaya katilir - katilimci olur ama SAHIP degildir
+  await new Promise((resolve) => sFriend.emit('join-room', { roomCode }, resolve));
+
+  const strangerResult = await new Promise((resolve) => sStranger.emit('join-friend-room', { targetUsername: owner.username }, resolve));
+  assert.ok(strangerResult.error, 'arkadas olmayan katilamamali');
+
+  const participantFriendResult = await new Promise((resolve) =>
+    sParticipantFriend.emit('join-friend-room', { targetUsername: friend.username }, resolve)
+  );
+  assert.ok(participantFriendResult.error, 'sahip olmayan bir katilimcinin arkadasi bu yolla katilamamali');
+
+  sOwner.close(); sFriend.close(); sStranger.close(); sParticipantFriend.close();
+});
+
+test('arkadas odasi: ozel (yalnizca davetle) odaya ve birebir aramaya dogrudan katilim reddedilir', async () => {
+  const owner = (await register(uniqueUsername('fropriv'), 'password1')).body;
+  const friend = (await register(uniqueUsername('frfpriv'), 'password1')).body;
+  await makeFriends(owner, friend);
+
+  const sOwner = connectSocket(owner.token);
+  const sFriend = connectSocket(friend.token);
+  await Promise.all([waitFor(sOwner, 'authenticated'), waitFor(sFriend, 'authenticated')]);
+
+  // varsayilan erisim 'invite' (yalnizca davetle)
+  const { roomCode } = await new Promise((resolve) => sOwner.emit('create-room', {}, resolve));
+  await new Promise((resolve) => sOwner.emit('join-room', { roomCode }, resolve));
+
+  const privateResult = await new Promise((resolve) => sFriend.emit('join-friend-room', { targetUsername: owner.username }, resolve));
+  assert.ok(privateResult.error, 'ozel odaya dogrudan katilim reddedilmeli');
+
+  // birebir arama odasi da bu yolla erisilemez olmali
+  // Ozel arama baslatmadan once mevcut gorusmeden ayrilmak gerekir.
+  sOwner.emit('leave-room');
+  const bIncoming = waitFor(sFriend, 'incoming-call');
+  sOwner.emit('call-friend', { toUsername: friend.username }, () => {});
+  await bIncoming; // arama basladi, callee henuz kabul etmedi
+
+  const callRoomResult = await new Promise((resolve) => sFriend.emit('join-friend-room', { targetUsername: owner.username }, resolve));
+  assert.ok(callRoomResult.error, 'birebir arama arkadas-odasi mekanizmasiyla erisilebilir olmamali');
+
+  sOwner.close(); sFriend.close();
+});
+
+test('arkadas odasi: erisim kapatilinca, arkadaslik kaldirilinca veya sahip ayrilinca eski bilgilerle katilim basarisiz olur', async () => {
+  const owner = (await register(uniqueUsername('froX'), 'password1')).body;
+  const friendA = (await register(uniqueUsername('frfXa'), 'password1')).body;
+  const friendB = (await register(uniqueUsername('frfXb'), 'password1')).body;
+  await makeFriends(owner, friendA);
+  await makeFriends(owner, friendB);
+
+  const sOwner = connectSocket(owner.token);
+  const sFriendA = connectSocket(friendA.token);
+  const sFriendB = connectSocket(friendB.token);
+  await Promise.all([waitFor(sOwner, 'authenticated'), waitFor(sFriendA, 'authenticated'), waitFor(sFriendB, 'authenticated')]);
+
+  const { roomCode } = await new Promise((resolve) => sOwner.emit('create-room', { access: 'friends' }, resolve));
+  await new Promise((resolve) => sOwner.emit('join-room', { roomCode }, resolve));
+
+  // erisimi kapat -> friendA artik katilamaz
+  const closeAck = await new Promise((resolve) => sOwner.emit('set-room-access', { access: 'invite' }, resolve));
+  assert.ok(closeAck.ok);
+  const afterCloseResult = await new Promise((resolve) => sFriendA.emit('join-friend-room', { targetUsername: owner.username }, resolve));
+  assert.ok(afterCloseResult.error, 'erisim kapatildiktan sonra katilim basarisiz olmali');
+
+  // tekrar ac, friendB arkadasligini kaldir -> friendB katilamaz
+  await new Promise((resolve) => sOwner.emit('set-room-access', { access: 'friends' }, resolve));
+  await removeFriendship(owner, friendB);
+  const afterUnfriendResult = await new Promise((resolve) => sFriendB.emit('join-friend-room', { targetUsername: owner.username }, resolve));
+  assert.ok(afterUnfriendResult.error, 'arkadasliktan cikarilan kisi katilamamali');
+
+  // sahip ayrilir -> friendA (hala arkadas ve erisim acik) artik katilamaz, mevcut katilimcilar (yok burda) etkilenmez
+  sOwner.emit('leave-room');
+  await new Promise((r) => setTimeout(r, 150));
+  const afterOwnerLeftResult = await new Promise((resolve) => sFriendA.emit('join-friend-room', { targetUsername: owner.username }, resolve));
+  assert.ok(afterOwnerLeftResult.error, 'sahip ayrildiktan sonra katilim basarisiz olmali');
+
+  sOwner.close(); sFriendA.close(); sFriendB.close();
+});
+
+test('arkadas odasi: sahip ayrilinca mevcut gorusme surer, son kisi ayrilinca oda temizlenir', async () => {
+  const owner = (await register(uniqueUsername('froY'), 'password1')).body;
+  const friend = (await register(uniqueUsername('frfY'), 'password1')).body;
+  await makeFriends(owner, friend);
+
+  const sOwner = connectSocket(owner.token);
+  const sFriend = connectSocket(friend.token);
+  await Promise.all([waitFor(sOwner, 'authenticated'), waitFor(sFriend, 'authenticated')]);
+
+  const { roomCode } = await new Promise((resolve) => sOwner.emit('create-room', { access: 'friends' }, resolve));
+  await new Promise((resolve) => sOwner.emit('join-room', { roomCode }, resolve));
+  const friendJoinAck = await new Promise((resolve) => sFriend.emit('join-room', { roomCode }, resolve));
+  assert.ok(friendJoinAck.ok);
+
+  const peerLeftPromise = waitFor(sFriend, 'peer-left');
+  sOwner.emit('leave-room');
+  const peerLeftPayload = await peerLeftPromise;
+  assert.ok(peerLeftPayload.id, 'sahip ayrilinca digerine peer-left gitmeli, gorusme sürmeli');
+
+  // oda hala var mi kontrolu: friend tekrar ayni koda (kendine) baglanabilir durumda olmali (oda silinmemis)
+  const stillThereAck = await new Promise((resolve) => sFriend.emit('join-room', { roomCode }, resolve));
+  assert.ok(stillThereAck.ok, 'sahip ayrildiktan sonra oda hala var olmali (katilimci kalmis)');
+
+  // simdi son kisi de ayrilsin -> oda ve gecmis temizlenmeli
+  sFriend.emit('leave-room');
+  await new Promise((r) => setTimeout(r, 150));
+  const afterAllLeftAck = await new Promise((resolve) => sFriend.emit('join-room', { roomCode }, resolve));
+  assert.ok(afterAllLeftAck.error, 'son kisi ayrildiktan sonra oda silinmis olmali');
+
+  sOwner.close(); sFriend.close();
+});
+
+test('arkadas odasi: erisim acilip kapaninca arkadasa gercek zamanli bildirim gider', async () => {
+  const owner = (await register(uniqueUsername('froZ'), 'password1')).body;
+  const friend = (await register(uniqueUsername('frfZ'), 'password1')).body;
+  await makeFriends(owner, friend);
+
+  const sOwner = connectSocket(owner.token);
+  const sFriend = connectSocket(friend.token);
+  await Promise.all([waitFor(sOwner, 'authenticated'), waitFor(sFriend, 'authenticated')]);
+
+  const { roomCode } = await new Promise((resolve) => sOwner.emit('create-room', {}, resolve));
+
+  const openStatusPromise = waitFor(sFriend, 'friend-room-status');
+  await new Promise((resolve) => sOwner.emit('join-room', { roomCode }, resolve));
+  await new Promise((resolve) => sOwner.emit('set-room-access', { access: 'friends' }, resolve));
+  const openPayload = await openStatusPromise;
+  assert.equal(openPayload.username, owner.username);
+  assert.equal(openPayload.roomOpen, true);
+
+  const closeStatusPromise = waitFor(sFriend, 'friend-room-status');
+  await new Promise((resolve) => sOwner.emit('set-room-access', { access: 'invite' }, resolve));
+  const closePayload = await closeStatusPromise;
+  assert.equal(closePayload.roomOpen, false);
+
+  sOwner.close(); sFriend.close();
 });

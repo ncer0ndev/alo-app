@@ -1,0 +1,142 @@
+[
+  {
+    "id": "chameleon",
+    "label": "Bukalemun",
+    "sheet": 1,
+    "column": 0,
+    "row": 0
+  },
+  {
+    "id": "owl",
+    "label": "Baykuş",
+    "sheet": 1,
+    "column": 1,
+    "row": 0
+  },
+  {
+    "id": "lion",
+    "label": "Aslan",
+    "sheet": 1,
+    "column": 2,
+    "row": 0
+  },
+  {
+    "id": "raccoon",
+    "label": "Rakun",
+    "sheet": 1,
+    "column": 3,
+    "row": 0
+  },
+  {
+    "id": "bat",
+    "label": "Yarasa",
+    "sheet": 1,
+    "column": 4,
+    "row": 0
+  },
+  {
+    "id": "doberman",
+    "label": "Doberman",
+    "sheet": 1,
+    "column": 0,
+    "row": 1
+  },
+  {
+    "id": "shark",
+    "label": "Köpekbalığı",
+    "sheet": 1,
+    "column": 1,
+    "row": 1
+  },
+  {
+    "id": "elephant",
+    "label": "Fil",
+    "sheet": 1,
+    "column": 2,
+    "row": 1
+  },
+  {
+    "id": "phoenix",
+    "label": "Anka kuşu",
+    "sheet": 1,
+    "column": 3,
+    "row": 1
+  },
+  {
+    "id": "polar-bear",
+    "label": "Kutup ayısı",
+    "sheet": 1,
+    "column": 4,
+    "row": 1
+  },
+  {
+    "id": "panda",
+    "label": "Panda",
+    "sheet": 2,
+    "column": 0,
+    "row": 0
+  },
+  {
+    "id": "fox",
+    "label": "Tilki",
+    "sheet": 2,
+    "column": 1,
+    "row": 0
+  },
+  {
+    "id": "cat",
+    "label": "Kedi",
+    "sheet": 2,
+    "column": 2,
+    "row": 0
+  },
+  {
+    "id": "shiba",
+    "label": "Shiba",
+    "sheet": 2,
+    "column": 3,
+    "row": 0
+  },
+  {
+    "id": "alien",
+    "label": "Uzaylı",
+    "sheet": 2,
+    "column": 4,
+    "row": 0
+  },
+  {
+    "id": "robot",
+    "label": "Robot",
+    "sheet": 2,
+    "column": 0,
+    "row": 1
+  },
+  {
+    "id": "rabbit",
+    "label": "Tavşan",
+    "sheet": 2,
+    "column": 1,
+    "row": 1
+  },
+  {
+    "id": "penguin",
+    "label": "Penguen",
+    "sheet": 2,
+    "column": 2,
+    "row": 1
+  },
+  {
+    "id": "dragon",
+    "label": "Ejderha",
+    "sheet": 2,
+    "column": 3,
+    "row": 1
+  },
+  {
+    "id": "bear",
+    "label": "Ayı",
+    "sheet": 2,
+    "column": 4,
+    "row": 1
+  }
+]
