@@ -10,6 +10,14 @@
 <body>
   <div class="crt-overlay"></div>
 
+  <div id="incoming-call-banner" class="call-banner hidden">
+    <span id="incoming-call-text"></span>
+    <div class="btn-row">
+      <button id="accept-call-btn" class="btn">[ KABUL ET ]</button>
+      <button id="decline-call-btn" class="btn btn-ghost">[ REDDET ]</button>
+    </div>
+  </div>
+
   <div class="banner">
     <pre>+==============================+
 |      A L O  //  V O I C E     |
@@ -41,6 +49,25 @@
       <div class="window-titlebar">--- lobby.sh ---</div>
       <div class="window-body">
         <p id="welcome-text" class="status-line ok"></p>
+
+        <div class="section-header">// arkadas ekle</div>
+        <label class="field">
+          <span class="prompt">alo:~$</span>
+          <input id="add-friend-input" type="text" placeholder="kullanici_adi" />
+        </label>
+        <button id="add-friend-btn" class="btn btn-secondary btn-block">[ ISTEK GONDER ]</button>
+        <p id="friend-status" class="status-line"></p>
+
+        <div id="incoming-requests-section" class="hidden">
+          <div class="section-header">// bekleyen istekler</div>
+          <ul id="incoming-requests" class="friend-list"></ul>
+        </div>
+
+        <div class="section-header">// arkadaslar</div>
+        <ul id="friends-list" class="friend-list"></ul>
+        <p id="friends-empty" class="status-line hidden">henuz arkadasin yok</p>
+
+        <div class="section-header">// oda koduyla katil</div>
         <label class="field">
           <span class="prompt">room@alo:~$</span>
           <input id="room-code" type="text" placeholder="oda_kodu" />
