@@ -199,6 +199,22 @@ body {
   margin: 0 auto 16px;
   border: 1px solid var(--border);
   background: var(--panel);
+  transition: max-width 0.15s ease;
+}
+
+/* Varsayilan pencere boyutu (acilista ~460px genislik) bu sorgulari hic
+   tetiklemez; kullanici pencereyi buyutup tam ekrana yakin kullanmak
+   isterse icerik kartinin bos beyaz alanda kaybolmamasi icin genisler. */
+@media (min-width: 900px) {
+  .window {
+    max-width: 760px;
+  }
+}
+
+@media (min-width: 1300px) {
+  .window {
+    max-width: 940px;
+  }
 }
 
 .window-titlebar {

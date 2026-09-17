@@ -16,4 +16,7 @@
 .avatar-choice:disabled { opacity: .6; cursor: wait; }
 #profile-avatar-preview .user-avatar { width: 88px; height: 88px; }
 .chat-message .meta .user-avatar { width: 26px; height: 26px; flex-basis: 26px; margin-right: 7px; }
-[data-theme="newsprint"] .user-avatar { border-radius: 0; }
+/* Not: gorseller kendi ic bukey/gradyan cercevesiyle geliyor, kose radius'u
+   sifirlanirsa (ornegin eskiden Gazete temasinda oldugu gibi) altindaki koyu
+   tuval koselerden disari tasip "kirli kose" gorunumu yaratiyor - bu yuzden
+   radius tum temalarda ayni (8px) tutuluyor. */
