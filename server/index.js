@@ -308,8 +308,12 @@ app.post('/api/profile/avatar', requireAuth, friendLimiter, asyncRoute(async (re
 app.get('/api/ice-servers', requireAuth, (_req, res) => {
   const iceServers = [{ urls: 'stun:stun.l.google.com:19302' }];
   if (process.env.TURN_URL) {
+    // Birden fazla TURN adresi (farkli port/protokol) virgulle ayrilarak
+    // TURN_URL icinde verilebilir; kisitlayici aglarda (ornegin UDP engelli)
+    // TCP/443 secenegi baglanmayi kurtarabilir.
+    const urls = process.env.TURN_URL.split(',').map((u) => u.trim()).filter(Boolean);
     iceServers.push({
-      urls: process.env.TURN_URL,
+      urls: urls.length > 1 ? urls : urls[0],
       username: process.env.TURN_USERNAME,
       credential: process.env.TURN_CREDENTIAL,
     });
