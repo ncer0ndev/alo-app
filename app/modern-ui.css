@@ -39,7 +39,7 @@
 [data-ui='modern'] .tab-btn { display: flex; align-items: center; gap: 10px; border: 0; padding: 12px 10px; font: 500 12px 'Inter', sans-serif; letter-spacing: 0; border-radius: 8px; text-transform: none; }
 [data-ui='modern'] .tab-btn.hidden { display: none; }
 [data-ui='modern'] .tab-btn::before { content: none; }
-[data-ui='modern'] .tab-btn.active { box-shadow: none; background: color-mix(in srgb, var(--accent) 14%, var(--panel)); color: var(--fg); font-weight: 700; }
+[data-ui='modern'] .tab-btn.active { box-shadow: none; background: color-mix(in srgb, var(--accent) 20%, transparent); color: var(--fg); font-weight: 700; }
 [data-ui='modern'] .nav-icon { display: block; width: 18px; height: 18px; flex: 0 0 18px; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
 [data-ui='modern'] .tab-content { padding: 28px; }
 [data-ui='modern'] .section-header { font: 700 13px 'Inter', sans-serif; letter-spacing: .2px; text-transform: none; margin: 24px 0 12px; }
@@ -50,7 +50,9 @@
 [data-ui='modern'] .field { gap: 8px; flex-direction: column; align-items: stretch; }
 [data-ui='modern'] .field > .prompt { font: 500 12px 'Inter', sans-serif; }
 [data-ui='modern'] .field > input, [data-ui='modern'] .field > select { width: 100%; min-height: 38px; }
-[data-ui='modern'] .theme-option { border-radius: 9px; border-width: 1px; box-shadow: none; }
+[data-ui='modern'] .theme-option { border-radius: 9px; border-width: 1px; box-shadow: none; padding: 14px; gap: 10px; }
+[data-ui='modern'] .theme-preview { height: 56px; padding: 8px; }
+[data-ui='modern'] .theme-option-name { font: 600 12px 'Inter', sans-serif; letter-spacing: 0; text-transform: none; }
 [data-ui='modern'] .ui-mode-switch-row { border-radius: 10px; padding: 16px; gap: 12px; }
 [data-ui='modern'] .community-area { position: relative; }
 [data-ui='modern'] .server-channel-rail { flex-basis: 192px; width: 192px; }
