@@ -67,7 +67,7 @@
 [data-ui='modern'] #server-text-channel-view { flex: 1; min-height: 0; display: flex; flex-direction: column; }
 [data-ui='modern'] #server-text-channel-view.hidden { display: none; }
 [data-ui='modern'] .community-message-log { flex: 1; min-height: 0; height: auto; }
-[data-ui='modern'] #tab-dm:has(#dm-thread-view:not(.hidden)) { display: flex; flex-direction: column; }
+[data-ui='modern'] #tab-dm:not(.hidden):has(#dm-thread-view:not(.hidden)) { display: flex; flex-direction: column; }
 [data-ui='modern'] #tab-dm.hidden { display: none; }
 [data-ui='modern'] #dm-thread-view:not(.hidden) { display: flex; flex-direction: column; flex: 1; min-height: 0; }
 [data-ui='modern'] #dm-log { flex: 1; min-height: 0; max-height: none; }
