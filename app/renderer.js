@@ -392,6 +392,10 @@ function applyTheme(theme) {
 // klasik moddayken sectigi renk temasi (terminal/gazete/kinetic) ayriyeten
 // hatirlanir ve klasige donulunce geri uygulanir.
 
+function prefersReducedMotion() {
+  return !!(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
+}
+
 function getUiMode() {
   return localStorage.getItem('uiMode') === 'modern' ? 'modern' : 'classic';
 }
@@ -4293,7 +4297,18 @@ themeRadios.forEach((radio) => {
 
 if (uiModeToggle) {
   uiModeToggle.addEventListener('change', () => {
-    applyUiMode(uiModeToggle.checked ? 'modern' : 'classic');
+    const nextMode = uiModeToggle.checked ? 'modern' : 'classic';
+    if (prefersReducedMotion()) {
+      applyUiMode(nextMode);
+      return;
+    }
+    document.body.classList.add('ui-transitioning');
+    window.setTimeout(() => {
+      applyUiMode(nextMode);
+      requestAnimationFrame(() => {
+        document.body.classList.remove('ui-transitioning');
+      });
+    }, 180);
   });
 }
 
@@ -4459,4 +4474,17 @@ if (window.api) window.api.setGameDetectionEnabled(getSettings().gameDetectionEn
 const existingSession = getSession();
 if (existingSession.token && existingSession.username) {
   enterJoinScreen(existingSession.username);
+}
+
+const bootOverlay = document.getElementById('boot-overlay');
+if (bootOverlay) {
+  const dismissBootOverlay = () => {
+    if (prefersReducedMotion()) {
+      bootOverlay.classList.add('hidden');
+      return;
+    }
+    bootOverlay.classList.add('boot-overlay-hide');
+    window.setTimeout(() => bootOverlay.classList.add('hidden'), 400);
+  };
+  window.setTimeout(dismissBootOverlay, prefersReducedMotion() ? 0 : 650);
 }

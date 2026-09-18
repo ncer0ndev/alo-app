@@ -439,6 +439,89 @@
   scrollbar-color: var(--dim) transparent;
 }
 
+/* Genel giris animasyonlari - bir eleman .hidden sinifini kaybedip
+   (display:none -> gorunur) DOM'a "yeniden giriyor" oldugunda tarayici bu
+   keyframe'leri otomatik baslatir; ekstra JS gerekmez. */
+@keyframes window-in {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.window:not(.hidden) {
+  animation: window-in 0.3s ease;
+}
+
+@keyframes tab-content-in {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.tab-content:not(.hidden) {
+  animation: tab-content-in 0.22s ease;
+}
+
+@keyframes modal-backdrop-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+.modal-backdrop:not(.hidden) {
+  animation: modal-backdrop-in 0.18s ease;
+}
+
+@keyframes modal-card-in {
+  from { opacity: 0; transform: scale(0.94) translateY(8px); }
+  to { opacity: 1; transform: scale(1) translateY(0); }
+}
+.modal-backdrop:not(.hidden) .modal-card {
+  animation: modal-card-in 0.22s cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+@keyframes hover-card-in {
+  from { opacity: 0; transform: scale(0.96); }
+  to { opacity: 1; transform: scale(1); }
+}
+.member-hover-card:not(.hidden) {
+  animation: hover-card-in 0.15s ease;
+}
+
+@keyframes toast-in {
+  from { opacity: 0; transform: translateX(-50%) translateY(8px); }
+  to { opacity: 1; transform: translateX(-50%) translateY(0); }
+}
+.toast:not(.hidden) {
+  animation: toast-in 0.22s ease;
+}
+
+@keyframes banner-in {
+  from { opacity: 0; transform: translateX(-50%) translateY(-10px); }
+  to { opacity: 1; transform: translateX(-50%) translateY(0); }
+}
+.call-banner:not(.hidden) {
+  animation: banner-in 0.22s ease;
+}
+
+@keyframes call-bar-in {
+  from { transform: translateY(-100%); }
+  to { transform: translateY(0); }
+}
+.active-call-bar:not(.hidden) {
+  animation: call-bar-in 0.22s ease;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .window,
+  .tab-content,
+  .modal-backdrop,
+  .modal-card,
+  .member-hover-card,
+  .toast,
+  .call-banner,
+  .active-call-bar,
+  #boot-overlay,
+  body {
+    animation: none !important;
+    transition: none !important;
+  }
+}
+
 /* Modern, ince kaydirma cubugu (Chromium/Electron); .chat-input kendi
    ozel kuraliyla (asagida) bunu eziyor ve tamamen gizli kaliyor. */
 *::-webkit-scrollbar {
@@ -476,7 +559,11 @@ body {
   color: var(--fg);
   font-family: var(--font-ui);
   font-size: 14px;
-  transition: background-color 0.15s ease, color 0.15s ease;
+  transition: background-color 0.15s ease, color 0.15s ease, opacity 0.18s ease;
+}
+
+body.ui-transitioning {
+  opacity: 0;
 }
 
 .texture-overlay {
@@ -1047,6 +1134,15 @@ textarea:focus-visible,
 }
 
 .update-overlay.hidden { display: none; }
+
+#boot-overlay {
+  transition: opacity 0.38s ease;
+}
+
+#boot-overlay.boot-overlay-hide {
+  opacity: 0;
+  pointer-events: none;
+}
 
 .update-overlay-mark {
   font: 700 34px/1 var(--font-data);
