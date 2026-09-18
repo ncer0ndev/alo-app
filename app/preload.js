@@ -115,4 +115,10 @@ contextBridge.exposeInMainWorld('api', {
     ipcRenderer.on('game-detected', listener);
     return () => ipcRenderer.removeListener('game-detected', listener);
   },
+
+  onUpdateInstalling: (callback) => {
+    const listener = () => callback();
+    ipcRenderer.on('update-installing', listener);
+    return () => ipcRenderer.removeListener('update-installing', listener);
+  },
 });

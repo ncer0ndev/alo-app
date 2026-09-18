@@ -607,6 +607,7 @@ app.get(
   requireAuth,
   asyncRoute(async (req, res) => {
     const friendRows = await db.listFriends(req.userId);
+    const dmPins = await db.listDmPins(req.userId);
     const friends = friendRows.map((f) => ({
       username: f.username,
       avatarId: publicAvatar(f),
@@ -614,6 +615,7 @@ app.get(
       online: isUserOnline(f.username),
       roomOpen: !!getOpenRoomForUser(f.id),
       statusMessage: f.status_message || '',
+      pinned: dmPins.has(f.id),
       ...gameStatusFields(f.username.toLowerCase()),
     }));
     const incoming = (await db.listIncomingRequests(req.userId)).map((u) => u.username);
@@ -775,6 +777,7 @@ app.get(
   requireAuth,
   asyncRoute(async (req, res) => {
     const friends = await db.listFriends(req.userId);
+    const dmPins = await db.listDmPins(req.userId);
     const conversations = await Promise.all(
       friends.map(async (friend) => {
         const last = await db.getLastDirectMessage(req.userId, friend.id);
@@ -782,14 +785,22 @@ app.get(
         return {
           username: friend.username,
           avatarId: publicAvatar(friend),
+          bannerId: friend.banner_id || '',
           online: isUserOnline(friend.username),
           lastText: last ? last.text : null,
           lastAt: last ? Number(last.created_at) : null,
           lastFromSelf: last ? Number(last.from_user_id) === req.userId : null,
           unreadCount,
+          pinned: dmPins.has(friend.id),
+          pinnedAt: dmPins.get(friend.id) || null,
         };
       })
     );
+    conversations.sort((a, b) => {
+      if (!!a.pinned !== !!b.pinned) return a.pinned ? -1 : 1;
+      if (a.pinned) return b.pinnedAt - a.pinnedAt;
+      return 0;
+    });
     res.json({ conversations });
   })
 );
@@ -830,6 +841,25 @@ app.post(
     if (!target) return res.status(404).json({ error: 'kullanici bulunamadi' });
     await db.markDmRead(req.userId, target.id, Date.now());
     res.json({ ok: true });
+  })
+);
+
+app.post(
+  '/api/dm/:username/pin',
+  requireAuth,
+  friendLimiter,
+  asyncRoute(async (req, res) => {
+    const targetUsername = req.params.username;
+    if (!isValidUsername(targetUsername)) return res.status(400).json({ error: 'gecersiz kullanici adi' });
+    const target = await db.getUserByUsername(targetUsername);
+    if (!target) return res.status(404).json({ error: 'kullanici bulunamadi' });
+    if (!(await db.areFriends(req.userId, target.id))) {
+      return res.status(403).json({ error: 'bu kullaniciyla arkadas degilsiniz' });
+    }
+    const { pinned } = req.body || {};
+    if (pinned) await db.pinDm(req.userId, target.id);
+    else await db.unpinDm(req.userId, target.id);
+    res.json({ ok: true, pinned: !!pinned });
   })
 );
 
@@ -984,8 +1014,23 @@ app.get(
         role: s.role,
         isOwner: s.owner_user_id === req.userId,
         unreadCount: Number(s.unread_count) || 0,
+        pinned: s.pinned_at != null,
       })),
     });
+  })
+);
+
+app.post(
+  '/api/servers/:id/pin',
+  requireAuth,
+  friendLimiter,
+  asyncRoute(async (req, res) => {
+    const serverId = Number(req.params.id);
+    const ctx = await requireServerMembership(req, res, serverId);
+    if (!ctx) return;
+    const { pinned } = req.body || {};
+    await db.setServerPinned(req.userId, serverId, !!pinned);
+    res.json({ ok: true, pinned: !!pinned });
   })
 );
 

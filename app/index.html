@@ -12,6 +12,12 @@
 <body>
   <div class="texture-overlay" aria-hidden="true"></div>
 
+  <div id="update-overlay" class="update-overlay hidden" role="status" aria-live="assertive">
+    <div class="update-overlay-mark" aria-hidden="true">···</div>
+    <p class="update-overlay-text">GÜNCELLENİYOR<span class="cursor">_</span></p>
+    <p class="update-overlay-hint">Uygulama birkaç saniye içinde yeniden başlayacak.</p>
+  </div>
+
   <div id="toast" class="toast hidden" role="status" aria-live="polite"></div>
 
   <div id="member-hover-card" class="member-hover-card hidden" role="tooltip">
@@ -94,6 +100,19 @@
         <div class="app-shell">
           <aside id="community-rail" class="community-rail" aria-label="Topluluklar">
             <button id="rail-home-btn" class="rail-home-btn active" aria-label="Ana sayfa" title="Ana sayfa">⌂</button>
+
+            <button id="rail-presence-btn" class="rail-presence-btn" aria-label="Çevrimiçi durumu değiştir" title="Çevrimiçi durumu değiştir">
+              <span id="rail-presence-dot" class="rail-presence-dot"></span>
+              <span id="rail-presence-label" class="rail-presence-label">Aktif</span>
+            </button>
+
+            <div class="community-sidebar-head">
+              <span class="community-eyebrow">MESAJLAR</span>
+            </div>
+            <ul id="dm-rail-list" class="community-server-list dm-rail-list"></ul>
+            <p id="dm-rail-empty" class="community-empty hidden">Henüz mesajın yok.</p>
+
+            <div class="rail-divider" aria-hidden="true"></div>
 
             <div class="community-sidebar-head">
               <span class="community-eyebrow">TOPLULUKLAR</span>
@@ -300,6 +319,11 @@
           </label>
           <div id="ringtone-volume-row" class="hidden">
             <input id="ringtone-volume-slider" type="range" min="0" max="100" aria-label="zil ses seviyesi" />
+            <label class="compact-field">
+              <span>ZİL SESİ</span>
+              <select id="ringtone-style-select" aria-label="zil sesi seç"></select>
+            </label>
+            <button id="ringtone-preview-btn" class="btn btn-ghost" type="button">[ ÖNİZLE ]</button>
           </div>
           <label class="radio-row">
             <input type="checkbox" id="notify-friend-checkbox" />

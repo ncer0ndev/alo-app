@@ -39,6 +39,8 @@ const statusMessageInput = document.getElementById('status-message-input');
 const saveStatusBtn = document.getElementById('save-status-btn');
 const statusMessageStatusEl = document.getElementById('status-message-status');
 const visibilityRadios = document.querySelectorAll('input[name="visibility-select"]');
+const railPresenceBtn = document.getElementById('rail-presence-btn');
+const railPresenceLabel = document.getElementById('rail-presence-label');
 const visibilityStatusEl = document.getElementById('visibility-status');
 
 const roomCodeDisplay = document.getElementById('room-code-display');
@@ -173,6 +175,8 @@ const dmListView = document.getElementById('dm-list-view');
 const dmThreadView = document.getElementById('dm-thread-view');
 const dmConversationsList = document.getElementById('dm-conversations');
 const dmConversationsEmpty = document.getElementById('dm-conversations-empty');
+const dmRailList = document.getElementById('dm-rail-list');
+const dmRailEmpty = document.getElementById('dm-rail-empty');
 const dmBackBtn = document.getElementById('dm-back-btn');
 const dmThreadUsername = document.getElementById('dm-thread-username');
 const dmLogEl = document.getElementById('dm-log');
@@ -196,6 +200,8 @@ const notifyCallCheckbox = document.getElementById('notify-call-checkbox');
 const ringtoneEnabledCheckbox = document.getElementById('ringtone-enabled-checkbox');
 const ringtoneVolumeRow = document.getElementById('ringtone-volume-row');
 const ringtoneVolumeSlider = document.getElementById('ringtone-volume-slider');
+const ringtoneStyleSelect = document.getElementById('ringtone-style-select');
+const ringtonePreviewBtn = document.getElementById('ringtone-preview-btn');
 const notifyFriendCheckbox = document.getElementById('notify-friend-checkbox');
 const notifyChatCheckbox = document.getElementById('notify-chat-checkbox');
 const notifyDmCheckbox = document.getElementById('notify-dm-checkbox');
@@ -324,6 +330,7 @@ function getSettings() {
     notifyChatContent: localStorage.getItem('notifyChatContent') === 'true',
     ringtoneEnabled: localStorage.getItem('ringtoneEnabled') !== 'false',
     ringtoneVolume: Number(localStorage.getItem('ringtoneVolume') ?? '70'),
+    ringtoneStyle: localStorage.getItem('ringtoneStyle') || 'chime',
     gameDetectionEnabled: localStorage.getItem('gameDetectionEnabled') === 'true',
   };
 }
@@ -512,6 +519,15 @@ function initSettingsTab() {
   notifyCallCheckbox.checked = settings.notifyIncomingCall;
   ringtoneEnabledCheckbox.checked = settings.ringtoneEnabled;
   ringtoneVolumeSlider.value = settings.ringtoneVolume;
+  if (ringtoneStyleSelect.options.length === 0) {
+    for (const style of RINGTONE_CATALOG) {
+      const opt = document.createElement('option');
+      opt.value = style.id;
+      opt.textContent = style.label;
+      ringtoneStyleSelect.appendChild(opt);
+    }
+  }
+  ringtoneStyleSelect.value = settings.ringtoneStyle;
   notifyFriendCheckbox.checked = settings.notifyFriendRequest;
   notifyChatCheckbox.checked = settings.notifyChatMessage;
   notifyDmCheckbox.checked = settings.notifyDmMessage;
@@ -975,10 +991,73 @@ async function callFriend(toUsername) {
 // ---- gelen arama zili ----
 // Harici bir ses dosyasi kullanilmiyor; ton dogrudan Web Audio ile uretilir.
 // Ayni cagri icin zil ust uste baslatilamaz (ringtoneCtx varsa yeni cagri yoksayilir).
+// Her nota yumusak bir attack/release zarfiyla calinir (osc.start/stop'un
+// dogrudan tetikledigi "cit" sesini onlemek icin) - eski zil bunu yapmiyordu
+// ve iki es zamanli sert sinyal, alarm/tatbikat siren tonuna benziyordu.
+
+const RINGTONE_CATALOG = [
+  {
+    id: 'chime',
+    label: 'Nazik Çan',
+    cycleMs: 1700,
+    notes: [
+      { at: 0, freq: 659.25, dur: 0.5, type: 'sine' },
+      { at: 0.22, freq: 987.77, dur: 0.6, type: 'sine' },
+    ],
+  },
+  {
+    id: 'marimba',
+    label: 'Marimba',
+    cycleMs: 1900,
+    notes: [
+      { at: 0, freq: 523.25, dur: 0.3, type: 'triangle' },
+      { at: 0.16, freq: 659.25, dur: 0.3, type: 'triangle' },
+      { at: 0.32, freq: 783.99, dur: 0.4, type: 'triangle' },
+    ],
+  },
+  {
+    id: 'soft-bell',
+    label: 'Yumuşak Zil',
+    cycleMs: 1500,
+    notes: [{ at: 0, freq: 739.99, dur: 0.75, type: 'sine' }],
+  },
+  {
+    id: 'melody',
+    label: 'Melodik',
+    cycleMs: 2100,
+    notes: [
+      { at: 0, freq: 587.33, dur: 0.28, type: 'triangle' },
+      { at: 0.2, freq: 739.99, dur: 0.28, type: 'triangle' },
+      { at: 0.4, freq: 880.0, dur: 0.45, type: 'triangle' },
+    ],
+  },
+];
+
+function getRingtoneStyle() {
+  const stored = getSettings().ringtoneStyle;
+  return RINGTONE_CATALOG.find((r) => r.id === stored) || RINGTONE_CATALOG[0];
+}
 
 let ringtoneCtx = null;
 let ringtoneGain = null;
 let ringtoneTimer = null;
+
+function playRingtoneNote(freq, startTime, duration, type) {
+  const osc = ringtoneCtx.createOscillator();
+  const envelope = ringtoneCtx.createGain();
+  osc.type = type;
+  osc.frequency.value = freq;
+  const attack = 0.02;
+  const release = Math.min(0.18, duration * 0.5);
+  envelope.gain.setValueAtTime(0, startTime);
+  envelope.gain.linearRampToValueAtTime(1, startTime + attack);
+  envelope.gain.setValueAtTime(1, startTime + duration - release);
+  envelope.gain.linearRampToValueAtTime(0, startTime + duration);
+  osc.connect(envelope);
+  envelope.connect(ringtoneGain);
+  osc.start(startTime);
+  osc.stop(startTime + duration);
+}
 
 function startRingtone() {
   const settings = getSettings();
@@ -993,20 +1072,48 @@ function startRingtone() {
   ringtoneGain.gain.value = Math.max(0, Math.min(1, settings.ringtoneVolume / 100));
   ringtoneGain.connect(ringtoneCtx.destination);
 
+  const style = getRingtoneStyle();
   const ringOnce = () => {
     if (!ringtoneCtx) return;
     const now = ringtoneCtx.currentTime;
-    [480, 620].forEach((freq) => {
-      const osc = ringtoneCtx.createOscillator();
-      osc.type = 'sine';
-      osc.frequency.value = freq;
-      osc.connect(ringtoneGain);
-      osc.start(now);
-      osc.stop(now + 0.4);
-    });
+    for (const note of style.notes) {
+      playRingtoneNote(note.freq, now + note.at, note.dur, note.type);
+    }
   };
   ringOnce();
-  ringtoneTimer = setInterval(ringOnce, 1200);
+  ringtoneTimer = setInterval(ringOnce, style.cycleMs);
+}
+
+function previewRingtone(styleId) {
+  let ctx;
+  try {
+    ctx = new AudioContext();
+  } catch {
+    return;
+  }
+  const gain = ctx.createGain();
+  gain.gain.value = Math.max(0, Math.min(1, getSettings().ringtoneVolume / 100));
+  gain.connect(ctx.destination);
+  const style = RINGTONE_CATALOG.find((r) => r.id === styleId) || RINGTONE_CATALOG[0];
+  const now = ctx.currentTime;
+  for (const note of style.notes) {
+    const osc = ctx.createOscillator();
+    const envelope = ctx.createGain();
+    osc.type = note.type;
+    osc.frequency.value = note.freq;
+    const startTime = now + note.at;
+    const attack = 0.02;
+    const release = Math.min(0.18, note.dur * 0.5);
+    envelope.gain.setValueAtTime(0, startTime);
+    envelope.gain.linearRampToValueAtTime(1, startTime + attack);
+    envelope.gain.setValueAtTime(1, startTime + note.dur - release);
+    envelope.gain.linearRampToValueAtTime(0, startTime + note.dur);
+    osc.connect(envelope);
+    envelope.connect(gain);
+    osc.start(startTime);
+    osc.stop(startTime + note.dur);
+  }
+  setTimeout(() => ctx.close().catch(() => {}), (style.notes.at(-1).at + style.notes.at(-1).dur) * 1000 + 200);
 }
 
 function stopRingtone() {
@@ -1473,9 +1580,17 @@ function updateDmTabBadge() {
   }
 }
 
+function sortDmConversations(list) {
+  return [...list].sort((a, b) => {
+    if (!!a.pinned !== !!b.pinned) return a.pinned ? -1 : 1;
+    if (a.pinned) return (b.pinnedAt || 0) - (a.pinnedAt || 0);
+    return (b.lastAt || 0) - (a.lastAt || 0);
+  });
+}
+
 function renderDmConversations() {
   dmConversationsList.innerHTML = '';
-  const sorted = [...dmConversations].sort((a, b) => (b.lastAt || 0) - (a.lastAt || 0));
+  const sorted = sortDmConversations(dmConversations);
   dmConversationsEmpty.classList.toggle('hidden', sorted.length > 0);
 
   for (const conv of sorted) {
@@ -1498,6 +1613,15 @@ function renderDmConversations() {
 
     li.append(dot, main);
 
+    const pinBtn = document.createElement('button');
+    pinBtn.className = 'btn btn-ghost pin-btn';
+    pinBtn.textContent = conv.pinned ? '[ SABİTİ KALDIR ]' : '[ SABİTLE ]';
+    pinBtn.onclick = (event) => {
+      event.stopPropagation();
+      toggleDmPin(conv.username, !conv.pinned);
+    };
+    li.appendChild(pinBtn);
+
     if (conv.unreadCount > 0) {
       const badge = document.createElement('span');
       badge.className = 'unread-badge';
@@ -1509,6 +1633,64 @@ function renderDmConversations() {
     dmConversationsList.appendChild(li);
   }
   updateDmTabBadge();
+  renderDmRail();
+}
+
+async function toggleDmPin(username, pinned) {
+  try {
+    await apiRequest(`/api/dm/${encodeURIComponent(username)}/pin`, { pinned });
+    const conv = findDmConversation(username);
+    if (conv) {
+      conv.pinned = pinned;
+      conv.pinnedAt = pinned ? Date.now() : null;
+    }
+    renderDmConversations();
+  } catch (err) {
+    showToast(err.message, 'error');
+  }
+}
+
+function renderDmRail() {
+  if (!dmRailList) return;
+  dmRailList.innerHTML = '';
+  const sorted = sortDmConversations(dmConversations);
+  dmRailEmpty.classList.toggle('hidden', sorted.length > 0);
+  for (const conv of sorted) {
+    const li = document.createElement('li');
+    li.className = `community-server-item dm-rail-item${conv.username.toLowerCase() === currentDmUsername?.toLowerCase() ? ' active' : ''}`;
+    li.tabIndex = 0;
+    li.setAttribute('role', 'button');
+    li.setAttribute('aria-label', `${conv.username} ile mesajları aç`);
+    const badge = document.createElement('span');
+    badge.className = 'community-server-badge';
+    badge.appendChild(profileAvatars.image(conv.username));
+    const main = document.createElement('div');
+    main.className = 'community-server-copy';
+    const name = document.createElement('span');
+    name.className = 'name';
+    name.textContent = conv.username;
+    main.append(name);
+    li.append(badge, main);
+    if (conv.unreadCount > 0) {
+      const unread = document.createElement('span');
+      unread.className = 'unread-badge';
+      unread.textContent = conv.unreadCount > 99 ? '99+' : String(conv.unreadCount);
+      li.appendChild(unread);
+    }
+    const openIt = () => {
+      enterHomeMode();
+      showTab('dm');
+      openDmThread(conv.username);
+    };
+    li.addEventListener('click', openIt);
+    li.addEventListener('keydown', (event) => {
+      if (event.key === 'Enter' || event.key === ' ') {
+        event.preventDefault();
+        openIt();
+      }
+    });
+    dmRailList.appendChild(li);
+  }
 }
 
 async function loadDmConversations() {
@@ -1600,6 +1782,7 @@ async function openDmThread(targetUsername) {
   dmListView.classList.add('hidden');
   dmThreadView.classList.remove('hidden');
   renderDmLog();
+  renderDmRail();
 
   const { token } = getSession();
   try {
@@ -1743,6 +1926,15 @@ async function loadServersList() {
   }
 }
 
+async function toggleServerPin(serverId, pinned) {
+  try {
+    await apiRequest(`/api/servers/${serverId}/pin`, { pinned });
+    await loadServersList();
+  } catch (err) {
+    showToast(err.message, 'error');
+  }
+}
+
 function serverRoleLabel(role) {
   return role === 'owner' ? 'sahip' : role === 'moderator' ? 'moderatör' : 'üye';
 }
@@ -1771,6 +1963,14 @@ function renderServersList(servers) {
     preview.textContent = serverRoleLabel(s.role);
     main.append(name, preview);
     li.append(badge, main);
+    const pinBtn = document.createElement('button');
+    pinBtn.className = 'btn btn-ghost pin-btn';
+    pinBtn.textContent = s.pinned ? '[ SABİTİ KALDIR ]' : '[ SABİTLE ]';
+    pinBtn.onclick = (event) => {
+      event.stopPropagation();
+      toggleServerPin(s.id, !s.pinned);
+    };
+    li.appendChild(pinBtn);
     if (s.unreadCount > 0) {
       const unread = document.createElement('span');
       unread.className = 'unread-badge';
@@ -3111,6 +3311,8 @@ function connectSocket() {
     profileAvatars.setAccount(username, avatarId);
     profileBanners.setAccount(username, bannerId);
     loadFriends();
+    loadOwnStatusMessage();
+    loadDmConversations();
   });
   socket.on('profile-updated', ({ username, avatarId, bannerId }) => {
     if (avatarId) profileAvatars.remember(username, avatarId);
@@ -3396,8 +3598,7 @@ async function loadOwnStatusMessage() {
     const data = await res.json();
     if (res.ok) {
       statusMessageInput.value = data.statusMessage || '';
-      const visibility = data.visibility === 'invisible' ? 'invisible' : 'online';
-      visibilityRadios.forEach((radio) => { radio.checked = radio.value === visibility; });
+      applyVisibilityUI(data.visibility === 'invisible' ? 'invisible' : 'online');
     }
   } catch {
     // sessizce yoksay
@@ -3419,9 +3620,16 @@ async function saveStatusMessage() {
   }
 }
 
+function applyVisibilityUI(visibility) {
+  visibilityRadios.forEach((radio) => { radio.checked = radio.value === visibility; });
+  railPresenceBtn.classList.toggle('invisible', visibility === 'invisible');
+  railPresenceLabel.textContent = visibility === 'invisible' ? 'Çevrimdışı' : 'Aktif';
+}
+
 async function saveVisibility(visibility) {
   try {
     await apiRequest('/api/profile/visibility', { visibility });
+    applyVisibilityUI(visibility);
     visibilityStatusEl.textContent = visibility === 'invisible' ? '[OK] çevrimdışı görüneceksin' : '[OK] aktif görüneceksin';
     visibilityStatusEl.className = 'status-line ok';
   } catch (err) {
@@ -3634,6 +3842,9 @@ if (window.api) {
       myGameStatusEl.classList.toggle('hidden', !myCurrentGame);
     }
   });
+  window.api.onUpdateInstalling(() => {
+    document.getElementById('update-overlay').classList.remove('hidden');
+  });
 }
 
 loginBtn.addEventListener('click', () => authRequest('/api/login'));
@@ -3649,6 +3860,9 @@ visibilityRadios.forEach((radio) => {
   radio.addEventListener('change', () => {
     if (radio.checked) saveVisibility(radio.value);
   });
+});
+railPresenceBtn.addEventListener('click', () => {
+  saveVisibility(railPresenceBtn.classList.contains('invisible') ? 'online' : 'invisible');
 });
 addFriendBtn.addEventListener('click', addFriend);
 joinBtn.addEventListener('click', joinRoom);
@@ -3865,6 +4079,14 @@ ringtoneEnabledCheckbox.addEventListener('change', () => {
 
 ringtoneVolumeSlider.addEventListener('input', () => {
   saveSetting('ringtoneVolume', ringtoneVolumeSlider.value);
+});
+
+ringtoneStyleSelect.addEventListener('change', () => {
+  saveSetting('ringtoneStyle', ringtoneStyleSelect.value);
+});
+
+ringtonePreviewBtn.addEventListener('click', () => {
+  previewRingtone(ringtoneStyleSelect.value);
 });
 
 notifyFriendCheckbox.addEventListener('change', () => {

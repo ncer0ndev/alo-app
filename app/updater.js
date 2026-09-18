@@ -30,7 +30,15 @@ function setupUpdater({ app, autoUpdater, dialog, Menu, getWindow, timers = glob
         detail: 'Yeniden başlatırsan açık görüşmen sonlanır. Hazır olduğunda kurulumu başlatabilirsin.',
         buttons: ['Daha sonra', 'Şimdi yeniden başlat'], defaultId: 0, cancelId: 0,
       });
-      if (response === 1 && !disposed) autoUpdater.quitAndInstall(false, true);
+      if (response === 1 && !disposed) {
+        const win = getWindow();
+        // Renderer'a "Guncelleniyor" yukleme ekranina gecmesi icin haber
+        // verilir; kurulum "sifirdan setup" sihirbazi gibi gorunmesin diye
+        // sessiz (isSilent=true) calisir - pencerelerin kapanip yeniden
+        // acilmasi zaten dogal bir gecikme birakir.
+        if (win && !win.isDestroyed()) win.webContents.send('update-installing');
+        autoUpdater.quitAndInstall(true, true);
+      }
     } finally { promptOpen = false; }
   }
 

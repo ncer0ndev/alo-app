@@ -102,6 +102,18 @@ async function createSchema() {
       PRIMARY KEY (server_id, user_id)
     )
   `);
+  const serverMemberColumns = await client.execute('PRAGMA table_info(server_members)');
+  if (!serverMemberColumns.rows.some((column) => column.name === 'pinned_at')) {
+    await client.execute('ALTER TABLE server_members ADD COLUMN pinned_at INTEGER');
+  }
+  await client.execute(`
+    CREATE TABLE IF NOT EXISTS dm_pins (
+      user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      friend_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      pinned_at INTEGER NOT NULL,
+      PRIMARY KEY (user_id, friend_id)
+    )
+  `);
   await client.execute(`
     CREATE TABLE IF NOT EXISTS server_channels (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -951,17 +963,40 @@ async function deleteUserAccount(userId) {
 // mesaj sayisini ekler (topluluk sekmesindeki rozet icin).
 async function listServersForUserWithUnread(userId) {
   const res = await client.execute({
-    sql: `SELECT s.id, s.name, s.icon_id, s.owner_user_id, s.invite_code, s.created_at, m.role,
+    sql: `SELECT s.id, s.name, s.icon_id, s.owner_user_id, s.invite_code, s.created_at, m.role, m.pinned_at,
             (SELECT COUNT(*) FROM server_messages sm
               JOIN server_channels ch ON ch.id = sm.channel_id AND ch.type = 'text' AND ch.server_id = s.id
               LEFT JOIN server_channel_read_state r ON r.channel_id = ch.id AND r.user_id = ?
               WHERE sm.created_at > COALESCE(r.last_read_at, 0)) AS unread_count
           FROM server_members m JOIN servers s ON s.id = m.server_id
           WHERE m.user_id = ?
-          ORDER BY s.created_at ASC`,
+          ORDER BY (m.pinned_at IS NULL) ASC, m.pinned_at DESC, s.created_at ASC`,
     args: [userId, userId],
   });
   return res.rows;
+}
+
+async function setServerPinned(userId, serverId, pinned) {
+  await client.execute({
+    sql: 'UPDATE server_members SET pinned_at = ? WHERE user_id = ? AND server_id = ?',
+    args: [pinned ? Date.now() : null, userId, serverId],
+  });
+}
+
+async function pinDm(userId, friendId) {
+  await client.execute({
+    sql: 'INSERT INTO dm_pins (user_id, friend_id, pinned_at) VALUES (?, ?, ?) ON CONFLICT (user_id, friend_id) DO UPDATE SET pinned_at = excluded.pinned_at',
+    args: [userId, friendId, Date.now()],
+  });
+}
+
+async function unpinDm(userId, friendId) {
+  await client.execute({ sql: 'DELETE FROM dm_pins WHERE user_id = ? AND friend_id = ?', args: [userId, friendId] });
+}
+
+async function listDmPins(userId) {
+  const res = await client.execute({ sql: 'SELECT friend_id, pinned_at FROM dm_pins WHERE user_id = ?', args: [userId] });
+  return new Map(res.rows.map((row) => [Number(row.friend_id), Number(row.pinned_at)]));
 }
 
 module.exports = {
@@ -1002,6 +1037,10 @@ module.exports = {
   setServerMemberRole,
   listServersForUser,
   listServersForUserWithUnread,
+  setServerPinned,
+  pinDm,
+  unpinDm,
+  listDmPins,
   listServerMembers,
   regenerateInviteCode,
   deleteServer,
