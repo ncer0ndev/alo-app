@@ -223,7 +223,7 @@ const runInBackgroundCheckbox = document.getElementById('run-in-background-check
 const launchAtLoginCheckbox = document.getElementById('launch-at-login-checkbox');
 
 const PTT_KEY_OPTIONS = window.api?.pttKeyOptions || ['Space'];
-const VALID_THEMES = ['terminal', 'newsprint', 'kinetic'];
+const VALID_THEMES = ['terminal', 'newsprint', 'kinetic', 'modern'];
 
 let socket = null;
 let localStream = null;
@@ -261,6 +261,16 @@ let levelMeterTempStream = null;
 const peerConnections = {};
 const audioElements = {};
 const participantNames = {};
+const participantVolumes = {};
+
+function getPeerIdForUsername(username) {
+  return Object.keys(participantNames).find((id) => participantNames[id] === username);
+}
+
+function applyParticipantVolume(id, name) {
+  const audio = audioElements[id];
+  if (audio) audio.volume = (participantVolumes[name] ?? 100) / 100;
+}
 const pendingCandidates = {};
 const peerAnalysers = {};
 
@@ -1377,13 +1387,14 @@ function renderParticipants() {
     vol.type = 'range';
     vol.min = '0';
     vol.max = '100';
-    vol.value = '100';
+    vol.value = String(participantVolumes[name] ?? 100);
     vol.className = 'volume-slider';
     vol.setAttribute('aria-label', `${name} ses seviyesi`);
     vol.oninput = () => {
-      const audio = audioElements[id];
-      if (audio) audio.volume = Number(vol.value) / 100;
+      participantVolumes[name] = Number(vol.value);
+      applyParticipantVolume(id, name);
     };
+    applyParticipantVolume(id, name);
 
     const muteOneBtn = document.createElement('button');
     muteOneBtn.className = 'btn btn-ghost';
@@ -2125,6 +2136,7 @@ function renderVoiceChannelMembers(row, members) {
     row.appendChild(list);
   }
   list.innerHTML = '';
+  const myUsername = getSession().username;
   for (const m of members) {
     profileAvatars.remember(m.username, m.avatarId);
     const item = document.createElement('li');
@@ -2133,6 +2145,24 @@ function renderVoiceChannelMembers(row, members) {
     nameSpan.className = 'name';
     nameSpan.textContent = m.username;
     item.append(profileAvatars.image(m.username), nameSpan);
+
+    if (m.username !== myUsername) {
+      const peerId = getPeerIdForUsername(m.username);
+      const vol = document.createElement('input');
+      vol.type = 'range';
+      vol.min = '0';
+      vol.max = '100';
+      vol.value = String(participantVolumes[m.username] ?? 100);
+      vol.className = 'volume-slider';
+      vol.setAttribute('aria-label', `${m.username} ses seviyesi`);
+      vol.oninput = () => {
+        participantVolumes[m.username] = Number(vol.value);
+        applyParticipantVolume(getPeerIdForUsername(m.username), m.username);
+      };
+      if (peerId) applyParticipantVolume(peerId, m.username);
+      item.append(vol);
+    }
+
     list.appendChild(item);
   }
 }
