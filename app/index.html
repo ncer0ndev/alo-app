@@ -167,6 +167,7 @@
           <button class="tab-btn" data-tab="join">[ ODAYA KATIL ]</button>
           <button class="tab-btn" data-tab="settings">[ AYARLAR ]</button>
           <button class="tab-btn" data-tab="profile">[ PROFİL ]</button>
+          <button class="tab-btn" data-tab="notepad">[ NOT DEFTERİ ]</button>
           <button class="tab-btn hidden" data-tab="admin" id="admin-tab-btn">[ YÖNETİM ]</button>
         </div>
 
@@ -430,6 +431,13 @@
           <button id="logout-btn" class="btn btn-ghost btn-block">[ ÇIKIŞ ]</button>
         </div>
 
+        <div id="tab-notepad" class="tab-content hidden">
+          <div class="section-header">// not defteri</div>
+          <p class="hint-text">Notların yalnızca sana görünür, otomatik kaydedilir.</p>
+          <textarea id="notepad-textarea" class="notepad-textarea" maxlength="20000" placeholder="buraya notlarını yaz..."></textarea>
+          <p id="notepad-status" class="status-line"></p>
+        </div>
+
         <div id="tab-admin" class="tab-content hidden">
           <div class="section-header">// kullanıcılar (yönetim)</div>
           <p class="hint-text">bu sekme yalnızca sana görünür. bir kullanıcının şifresini sıfırlarsan geçici şifreyi kendisine iletmen gerekir.</p>
@@ -491,6 +499,7 @@
                     <h2 id="server-detail-name"></h2>
                   </div>
                   <button id="server-invite-envelope-btn" class="server-settings-gear-btn hidden" aria-label="Arkadaş davet et" title="Arkadaş davet et">✉</button>
+                  <button id="server-edit-mode-btn" class="server-settings-gear-btn hidden" aria-label="Kanalları düzenle" title="Kanalları düzenle">✎</button>
                   <button id="server-settings-gear-btn" class="server-settings-gear-btn" aria-label="Topluluk ayarları" title="Topluluk ayarları">⚙</button>
                   <button id="server-back-btn" class="btn btn-ghost server-back-btn" aria-label="Ana sayfaya dön">[ ANA SAYFA ]</button>
                 </header>

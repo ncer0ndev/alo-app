@@ -38,6 +38,9 @@ const myGameStatusEl = document.getElementById('my-game-status');
 const statusMessageInput = document.getElementById('status-message-input');
 const saveStatusBtn = document.getElementById('save-status-btn');
 const statusMessageStatusEl = document.getElementById('status-message-status');
+
+const notepadTextarea = document.getElementById('notepad-textarea');
+const notepadStatusEl = document.getElementById('notepad-status');
 const visibilityRadios = document.querySelectorAll('input[name="visibility-select"]');
 const railPresenceBtn = document.getElementById('rail-presence-btn');
 const railPresenceLabel = document.getElementById('rail-presence-label');
@@ -169,6 +172,7 @@ const loadJoinRequestsBtn = document.getElementById('load-join-requests-btn');
 const serverManagementList = document.getElementById('server-management-list');
 const joinApprovalRadios = document.querySelectorAll('input[name="join-approval-select"]');
 const serverInviteEnvelopeBtn = document.getElementById('server-invite-envelope-btn');
+const serverEditModeBtn = document.getElementById('server-edit-mode-btn');
 const inviteFriendModal = document.getElementById('invite-friend-modal');
 const inviteFriendCloseBtn = document.getElementById('invite-friend-close-btn');
 const inviteFriendHint = document.getElementById('invite-friend-hint');
@@ -235,6 +239,7 @@ let currentChannelServerId = null;
 let currentChannelDisplayName = null;
 let currentServerChannelRole = null;
 let activeServerDetail = null; // { id, name, role, inviteCode, members, channels }
+let channelEditMode = false; // kalem simgesiyle acilip kapanir; kanal SİL/AD/sirala butonlari yalnizca bu modda gorunur
 let currentTextChannel = null; // { serverId, channelId, name }
 let textChannelMessages = [];
 let textChannelAutoScroll = true;
@@ -444,6 +449,11 @@ function logout() {
   currentDmUsername = null;
   dmMessages = [];
   seenDmMessageIds.clear();
+  clearTimeout(notepadSaveTimer);
+  notepadLoaded = false;
+  notepadTextarea.value = '';
+  notepadStatusEl.textContent = '';
+  notepadStatusEl.className = 'status-line';
   dmListView.classList.remove('hidden');
   dmThreadView.classList.add('hidden');
   updateDmTabBadge();
@@ -471,6 +481,7 @@ function showTab(tabName) {
   if (tabName === 'dm') loadDmConversations();
   if (tabName === 'admin') loadAdminUsers();
   if (tabName === 'profile') loadOwnStatusMessage();
+  if (tabName === 'notepad') loadNotepad();
 }
 
 // ---- TURN/ICE yapilandirmasi ----
@@ -2038,6 +2049,7 @@ async function joinServerByCode() {
 
 function enterHomeMode() {
   activeServerDetail = null;
+  channelEditMode = false;
   hideMemberHoverCard();
   closeTextChannel();
   communityRail.classList.remove('collapsed', 'reveal-ready');
@@ -2059,6 +2071,7 @@ function enterCommunityMode() {
 
 async function openServerDetail(serverId) {
   const { token } = getSession();
+  if (activeServerDetail?.id !== serverId) channelEditMode = false;
   enterCommunityMode();
   serverDetailLoadState.className = 'community-detail-state';
   serverDetailLoadMessage.textContent = 'Topluluk yükleniyor...';
@@ -2186,6 +2199,8 @@ function renderServerDetail() {
   serverManagementSection.classList.toggle('hidden', !isOwner);
   serverModerationSection.classList.toggle('hidden', !isOwner && !isMod);
   serverInviteEnvelopeBtn.classList.toggle('hidden', d.role !== 'member');
+  serverEditModeBtn.classList.toggle('hidden', !isOwner && !isMod);
+  serverEditModeBtn.classList.toggle('active', channelEditMode);
   if (isOwner) {
     const approvalValue = d.joinApprovalRequired ? 'approval' : 'direct';
     joinApprovalRadios.forEach((radio) => { radio.checked = radio.value === approvalValue; });
@@ -2252,7 +2267,7 @@ function renderServerDetail() {
       }
     });
 
-    if (isOwner || isMod) {
+    if ((isOwner || isMod) && channelEditMode) {
       const delBtn = document.createElement('button');
       delBtn.className = 'btn btn-ghost';
       delBtn.textContent = '[ SİL ]';
@@ -2293,7 +2308,7 @@ function renderServerDetail() {
     joinChBtn.onclick = inThisChannel ? () => leaveRoom() : () => joinServerVoiceChannel(d.id, c.id, c.name);
     li.append(joinChBtn);
 
-    if (isOwner || isMod) {
+    if ((isOwner || isMod) && channelEditMode) {
       const delBtn = document.createElement('button');
       delBtn.className = 'btn btn-ghost';
       delBtn.textContent = '[ SİL ]';
@@ -3772,6 +3787,44 @@ async function saveVisibility(visibility) {
   }
 }
 
+// ---- not defteri ----
+
+let notepadSaveTimer = null;
+let notepadLoaded = false;
+
+async function loadNotepad() {
+  if (notepadLoaded) return;
+  const { token } = getSession();
+  try {
+    const res = await fetch(`${getServerUrl()}/api/me`, { headers: { Authorization: `Bearer ${token}` } });
+    const data = await res.json();
+    if (res.ok) {
+      notepadTextarea.value = data.notes || '';
+      notepadLoaded = true;
+    }
+  } catch {
+    // sessizce yoksay
+  }
+}
+
+async function saveNotepad() {
+  try {
+    await apiRequest('/api/profile/notes', { notes: notepadTextarea.value });
+    notepadStatusEl.textContent = '[OK] kaydedildi';
+    notepadStatusEl.className = 'status-line ok';
+  } catch (err) {
+    notepadStatusEl.textContent = err.message;
+    notepadStatusEl.className = 'status-line error';
+  }
+}
+
+notepadTextarea.addEventListener('input', () => {
+  notepadStatusEl.textContent = '';
+  notepadStatusEl.className = 'status-line';
+  clearTimeout(notepadSaveTimer);
+  notepadSaveTimer = setTimeout(saveNotepad, 800);
+});
+
 // ---- yonetim paneli (yalnizca necr0n) ----
 
 function formatAdminDate(iso) {
@@ -4112,6 +4165,10 @@ loadJoinRequestsBtn.addEventListener('click', loadJoinRequests);
 leaveServerBtn.addEventListener('click', leaveServer);
 deleteServerBtn.addEventListener('click', deleteServer);
 serverInviteEnvelopeBtn.addEventListener('click', openInviteFriendModal);
+serverEditModeBtn.addEventListener('click', () => {
+  channelEditMode = !channelEditMode;
+  renderServerDetail();
+});
 inviteFriendCloseBtn.addEventListener('click', closeInviteFriendModal);
 inviteFriendModal.addEventListener('click', (event) => {
   if (event.target === inviteFriendModal) closeInviteFriendModal();

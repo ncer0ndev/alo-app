@@ -438,6 +438,7 @@ app.get('/api/me', requireAuth, asyncRoute(async (req, res) => {
     statusMessage: user.status_message || '',
     visibility: user.visibility === 'invisible' ? 'invisible' : 'online',
     bannerId: user.banner_id || '',
+    notes: user.notes || '',
   });
 }));
 
@@ -490,6 +491,15 @@ app.post('/api/profile/banner', requireAuth, friendLimiter, asyncRoute(async (re
   }
   for (const sid of recipients) io.to(sid).emit('profile-updated', payload);
   res.json(payload);
+}));
+
+app.post('/api/profile/notes', requireAuth, friendLimiter, asyncRoute(async (req, res) => {
+  const user = await db.getUserById(req.userId);
+  if (!user) return res.status(401).json({ error: 'gecersiz oturum' });
+  const { notes } = req.body || {};
+  if (typeof notes !== 'string' || notes.length > 20000) return res.status(400).json({ error: 'Gecersiz not.' });
+  await db.setNotes(user.id, notes);
+  res.json({ notes });
 }));
 
 app.post('/api/profile/password', requireAuth, loginLimiter, asyncRoute(async (req, res) => {

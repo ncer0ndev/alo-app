@@ -44,6 +44,9 @@ async function createSchema() {
   if (!columns.rows.some((column) => column.name === 'banner_id')) {
     await client.execute("ALTER TABLE users ADD COLUMN banner_id TEXT NOT NULL DEFAULT ''");
   }
+  if (!columns.rows.some((column) => column.name === 'notes')) {
+    await client.execute("ALTER TABLE users ADD COLUMN notes TEXT NOT NULL DEFAULT ''");
+  }
   await client.execute(`
     CREATE TABLE IF NOT EXISTS friendships (
       user_a_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -536,6 +539,10 @@ async function setVisibility(userId, visibility) {
 
 async function setBanner(userId, bannerId) {
   await client.execute({ sql: 'UPDATE users SET banner_id = ? WHERE id = ?', args: [bannerId, userId] });
+}
+
+async function setNotes(userId, notes) {
+  await client.execute({ sql: 'UPDATE users SET notes = ? WHERE id = ?', args: [notes, userId] });
 }
 
 // ---- sunucular (topluluklar) ----
@@ -1066,6 +1073,7 @@ module.exports = {
   setStatusMessage,
   setVisibility,
   setBanner,
+  setNotes,
   usingRemote,
   init,
   createUser,
