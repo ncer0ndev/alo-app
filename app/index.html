@@ -8,6 +8,7 @@
   <link rel="stylesheet" href="fonts/fonts.css" />
   <link rel="stylesheet" href="styles.css" />
   <link rel="stylesheet" href="avatars.css" />
+  <link rel="stylesheet" href="modern-ui.css" />
 </head>
 <body>
   <div id="boot-overlay" class="update-overlay" role="status" aria-live="polite">
@@ -166,7 +167,7 @@
           </aside>
 
           <div id="home-area" class="home-area">
-        <div class="tab-bar">
+        <div class="tab-bar" role="tablist" aria-label="Ana menü">
           <button class="tab-btn active" data-tab="friends">[ ARKADAŞLAR ]</button>
           <button class="tab-btn" data-tab="dm">[ MESAJLAR <span id="dm-tab-badge" class="tab-badge hidden"></span> ]</button>
           <button class="tab-btn" data-tab="create">[ ODA OLUŞTUR ]</button>
@@ -249,7 +250,7 @@
           <label class="ui-mode-switch-row">
             <span class="ui-mode-switch-copy">
               <span class="ui-mode-switch-title">Modern arayüz</span>
-              <span class="ui-mode-switch-hint">Kalıcı yan menülü, sade bir düzene geçer.</span>
+              <span class="ui-mode-switch-hint">Yan menülü düzen. Aşağıdan istediğin rengi seçebilirsin.</span>
             </span>
             <span class="ui-mode-switch">
               <input type="checkbox" id="ui-mode-toggle" />
@@ -291,6 +292,10 @@
                 <input type="radio" name="theme-select" value="kinetic" />
                 <span class="theme-option-name">Kinetic</span>
               </span>
+            </label>
+            <label class="theme-option">
+              <span class="theme-preview theme-preview-modern" aria-hidden="true"><span class="theme-preview-bar"></span><span class="theme-preview-line"></span></span>
+              <span class="theme-option-head"><input type="radio" name="theme-select" value="modern" /><span class="theme-option-name">Modern</span></span>
             </label>
           </div>
 
@@ -468,6 +473,10 @@
           </div>
 
           <div id="community-area" class="community-area hidden">
+            <div class="community-view-tools" aria-label="Topluluk panelleri">
+              <button type="button" id="toggle-channels" class="btn btn-ghost" aria-controls="server-channel-rail" aria-expanded="false">Kanallar</button>
+              <button type="button" id="toggle-members" class="btn btn-ghost" aria-controls="server-members-panel" aria-expanded="false">Üyeler</button>
+            </div>
             <aside id="server-channel-rail" class="server-channel-rail" aria-label="Kanallar">
               <div class="server-channel-rail-head">
                 <span class="community-kicker">KANALLAR</span>
@@ -663,6 +672,7 @@
   <script src="banner-catalog.js"></script>
   <script src="banners.js"></script>
   <script src="renderer.js"></script>
+  <script src="modern-ui.js"></script>
 
 </body>
 </html>

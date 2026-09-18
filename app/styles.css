@@ -348,89 +348,13 @@
   box-shadow: 6px 6px 0 #000;
 }
 
-/* data-ui='modern': renkten (data-theme) bagimsiz, salt YAPISAL bir mod - ana
-   sayfadaki yatay sekme cubugunu, topluluk rayinin yanina kalici, dikey bir
-   ikinci navigasyon sutununa donusturur (Discord/Slack tarzi 3 sutunlu kabuk).
-   renderer.js'teki hicbir eleman tasinmiyor/kopyalanmiyor; ayni .tab-bar ve
-   .tab-content kardesleri .home-area icinde flex-direction:row ile yeniden
-   duzenleniyor. Ayarlar'daki switch acikken data-theme otomatik olarak
-   'modern' oluyor (bkz. renderer.js applyUiMode), bu yuzden renk taraf
-   zaten yukaridaki [data-theme='modern'] bloklariyla geliyor. */
+/* data-ui='modern' yapisal (layout) kurallari artik modern-ui.css'te -
+   burada yalnizca renk/dekor kurallari ([data-theme='modern']) kaliyor.
+   Pencere basligi susleri ("--- ... ---") her iki modda da HTML'de
+   .chrome-deco span'i olarak isaretleniyor; modern arayuz modunda
+   gizleniyor. */
 [data-ui='modern'] .chrome-deco {
   display: none;
-}
-
-[data-ui='modern'] .home-area {
-  display: flex;
-  flex-direction: row;
-  align-items: stretch;
-  padding: 0;
-  overflow: hidden;
-}
-
-[data-ui='modern'] .home-area .tab-bar,
-[data-ui='modern'] .home-area .tab-content {
-  max-width: none;
-}
-
-[data-ui='modern'] .tab-bar {
-  flex: 0 0 190px;
-  width: 190px;
-  height: 100%;
-  flex-direction: column;
-  align-items: stretch;
-  flex-wrap: nowrap;
-  gap: 4px;
-  margin: 0;
-  padding: 16px 10px;
-  border-bottom: none;
-  border-right: 3px solid #000;
-  background: color-mix(in srgb, var(--bg) 88%, var(--panel));
-  overflow-y: auto;
-}
-
-[data-ui='modern'] .tab-btn {
-  flex: 0 0 auto;
-  width: 100%;
-  min-width: 0;
-  justify-content: flex-start;
-  text-align: left;
-  padding: 10px 12px;
-  border: 3px solid transparent;
-}
-
-[data-ui='modern'] .tab-btn:hover {
-  border-color: #000;
-}
-
-[data-ui='modern'] .tab-btn.active {
-  border-color: #000;
-  box-shadow: 3px 3px 0 var(--accent);
-}
-
-[data-ui='modern'] .tab-btn::before {
-  margin-right: 8px;
-}
-
-[data-ui='modern'] .tab-btn[data-tab='friends']::before { content: '◈'; }
-[data-ui='modern'] .tab-btn[data-tab='dm']::before { content: '✉'; }
-[data-ui='modern'] .tab-btn[data-tab='create']::before { content: '＋'; }
-[data-ui='modern'] .tab-btn[data-tab='join']::before { content: '⇥'; }
-[data-ui='modern'] .tab-btn[data-tab='settings']::before { content: '⚙'; }
-[data-ui='modern'] .tab-btn[data-tab='profile']::before { content: '◐'; }
-[data-ui='modern'] .tab-btn[data-tab='notepad']::before { content: '✎'; }
-[data-ui='modern'] .tab-btn[data-tab='admin']::before { content: '★'; }
-
-[data-ui='modern'] .tab-content {
-  flex: 1 1 auto;
-  min-width: 0;
-  height: 100%;
-  overflow-y: auto;
-  padding: 24px 28px;
-}
-
-[data-ui='modern'] .community-rail {
-  border-right: 3px solid #000;
 }
 
 * {
@@ -2320,8 +2244,8 @@ textarea:focus-visible,
   background: var(--panel);
 }
 
-.server-detail-header h2 { font-size: 20px; }
-.server-detail-title { flex: 1; min-width: 0; }
+.server-detail-header h2 { font-size: 20px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.server-detail-title { flex: 1; min-width: 0; overflow: hidden; }
 .community-detail-icon {
   display: block;
   width: 42px;

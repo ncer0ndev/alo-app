@@ -225,7 +225,7 @@ const runInBackgroundCheckbox = document.getElementById('run-in-background-check
 const launchAtLoginCheckbox = document.getElementById('launch-at-login-checkbox');
 
 const PTT_KEY_OPTIONS = window.api?.pttKeyOptions || ['Space'];
-const VALID_THEMES = ['terminal', 'newsprint', 'kinetic'];
+const VALID_THEMES = ['terminal', 'newsprint', 'kinetic', 'modern'];
 
 let socket = null;
 let localStream = null;
@@ -378,9 +378,7 @@ function getTheme() {
 function applyTheme(theme) {
   const safeTheme = VALID_THEMES.includes(theme) ? theme : 'terminal';
   localStorage.setItem('theme', safeTheme);
-  if (getUiMode() !== 'modern') {
-    document.documentElement.setAttribute('data-theme', safeTheme);
-  }
+  document.documentElement.setAttribute('data-theme', safeTheme);
   themeRadios.forEach((radio) => {
     radio.checked = radio.value === safeTheme;
   });
@@ -404,9 +402,9 @@ function applyUiMode(mode) {
   const safeMode = mode === 'modern' ? 'modern' : 'classic';
   localStorage.setItem('uiMode', safeMode);
   document.documentElement.setAttribute('data-ui', safeMode);
-  document.documentElement.setAttribute('data-theme', safeMode === 'modern' ? 'modern' : getTheme());
+  document.documentElement.setAttribute('data-theme', getTheme());
   if (uiModeToggle) uiModeToggle.checked = safeMode === 'modern';
-  if (themeOptionsGroup) themeOptionsGroup.classList.toggle('hidden', safeMode === 'modern');
+  if (themeOptionsGroup) themeOptionsGroup.classList.remove('hidden');
 }
 
 function showScreen(screen) {
@@ -509,7 +507,12 @@ function logout() {
 // ---- sekmeler ----
 
 function showTab(tabName) {
-  tabBtns.forEach((btn) => btn.classList.toggle('active', btn.dataset.tab === tabName));
+  tabBtns.forEach((btn) => {
+    const selected = btn.dataset.tab === tabName;
+    btn.classList.toggle('active', selected);
+    btn.setAttribute('aria-selected', String(selected));
+    btn.tabIndex = selected ? 0 : -1;
+  });
   tabContents.forEach((content) => content.classList.toggle('hidden', content.id !== `tab-${tabName}`));
   if (tabName === 'settings') {
     initSettingsTab();
@@ -557,7 +560,7 @@ function initSettingsTab() {
     radio.checked = radio.value === currentTheme;
   });
   if (uiModeToggle) uiModeToggle.checked = getUiMode() === 'modern';
-  if (themeOptionsGroup) themeOptionsGroup.classList.toggle('hidden', getUiMode() === 'modern');
+  if (themeOptionsGroup) themeOptionsGroup.classList.remove('hidden');
 
   const settings = getSettings();
   micModeRadios.forEach((radio) => {
@@ -2458,6 +2461,21 @@ function renderServerDetail() {
       actions.append(blockBtn, reportBtn);
     }
 
+    if (actions.childElementCount) {
+      const menu = document.createElement('details');
+      menu.className = 'member-actions-menu';
+      const trigger = document.createElement('summary');
+      trigger.textContent = '•••';
+      trigger.setAttribute('aria-label', `${m.username} için işlemler`);
+      menu.append(trigger, actions);
+      li.append(menu);
+      menu.addEventListener('toggle', () => {
+        if (menu.open) {
+          hideMemberHoverCard();
+          serverMembersList.querySelectorAll('.member-actions-menu[open]').forEach((other) => { if (other !== menu) other.open = false; });
+        }
+      });
+    }
     return li;
   }
 }
@@ -4478,13 +4496,37 @@ if (existingSession.token && existingSession.username) {
 
 const bootOverlay = document.getElementById('boot-overlay');
 if (bootOverlay) {
+  // Sabit bir bekleme yerine sayfanin gercekten hazir olma sinyaline
+  // (document.readyState/'load') baglaniyor; ilk acilista biraz daha uzun
+  // gosteriliyor, sonraki acilislarda (localStorage bayragi) kisaltiliyor.
+  let dismissed = false;
+  let seenBootBefore = false;
+  try {
+    seenBootBefore = localStorage.getItem('hasBootedBefore') === '1';
+    localStorage.setItem('hasBootedBefore', '1');
+  } catch {
+    // localStorage erisilemezse varsayilan (ilk acilis) suresiyle devam edilir
+  }
+  const minDisplayMs = seenBootBefore ? 120 : 450;
+  const maxWaitMs = seenBootBefore ? 500 : 1600;
+  const startedAt = performance.now();
   const dismissBootOverlay = () => {
-    if (prefersReducedMotion()) {
-      bootOverlay.classList.add('hidden');
-      return;
-    }
-    bootOverlay.classList.add('boot-overlay-hide');
-    window.setTimeout(() => bootOverlay.classList.add('hidden'), 400);
+    if (dismissed) return;
+    dismissed = true;
+    const remaining = Math.max(0, minDisplayMs - (performance.now() - startedAt));
+    window.setTimeout(() => {
+      if (prefersReducedMotion()) {
+        bootOverlay.remove();
+        return;
+      }
+      bootOverlay.classList.add('boot-overlay-hide');
+      window.setTimeout(() => bootOverlay.remove(), 380);
+    }, remaining);
   };
-  window.setTimeout(dismissBootOverlay, prefersReducedMotion() ? 0 : 650);
+  if (document.readyState === 'complete') {
+    dismissBootOverlay();
+  } else {
+    window.addEventListener('load', dismissBootOverlay, { once: true });
+  }
+  window.setTimeout(dismissBootOverlay, maxWaitMs);
 }

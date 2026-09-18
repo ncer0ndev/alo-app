@@ -1,5 +1,5 @@
 (function () {
-  var VALID_THEMES = ['terminal', 'newsprint', 'kinetic'];
+  var VALID_THEMES = ['terminal', 'newsprint', 'kinetic', 'modern'];
   var theme = 'terminal';
   try {
     var stored = localStorage.getItem('theme');
@@ -15,6 +15,6 @@
     uiMode = 'classic';
   }
 
-  document.documentElement.setAttribute('data-theme', uiMode === 'modern' ? 'modern' : theme);
+  document.documentElement.setAttribute('data-theme', theme);
   document.documentElement.setAttribute('data-ui', uiMode);
 })();
