@@ -1548,51 +1548,59 @@ textarea:focus-visible,
   flex-basis: 220px;
   width: 220px;
   padding: 14px 10px;
+  overflow-y: hidden;
 }
 
-.community-rail.collapsed:hover .community-sidebar-head,
+/* Icerik (isimler, basliklar) genislik gecisi bitene kadar gizli kalir -
+   JS bu gecikmeyle "reveal-ready" sinifini ekler (bkz. renderer.js);
+   aksi halde metin, aradaki her dar genislikte yeniden satira bolunup
+   kisa sureli cirkin bir "ziplama"ya ve gecici bir kaydirma cubuguna
+   yol aciyordu. Klavyeyle odaklaninca (:focus-within) beklemeden aninda
+   gorunur - erisilebilirlik icin gecikme uygulanmaz.
+   */
+.community-rail.collapsed.reveal-ready .community-sidebar-head,
 .community-rail.collapsed:focus-within .community-sidebar-head {
   display: flex;
 }
 
-.community-rail.collapsed:hover .community-load-state,
+.community-rail.collapsed.reveal-ready .community-load-state,
 .community-rail.collapsed:focus-within .community-load-state,
-.community-rail.collapsed:hover .community-empty,
+.community-rail.collapsed.reveal-ready .community-empty,
 .community-rail.collapsed:focus-within .community-empty,
-.community-rail.collapsed:hover .community-action-panel,
+.community-rail.collapsed.reveal-ready .community-action-panel,
 .community-rail.collapsed:focus-within .community-action-panel {
   display: block;
 }
 
-.community-rail.collapsed:hover .community-server-item,
+.community-rail.collapsed.reveal-ready .community-server-item,
 .community-rail.collapsed:focus-within .community-server-item {
   justify-content: flex-start;
   gap: 9px;
   padding: 8px;
 }
 
-.community-rail.collapsed:hover .community-server-copy,
+.community-rail.collapsed.reveal-ready .community-server-copy,
 .community-rail.collapsed:focus-within .community-server-copy {
   display: flex;
 }
 
-.community-rail.collapsed:hover .community-server-item .unread-badge,
+.community-rail.collapsed.reveal-ready .community-server-item .unread-badge,
 .community-rail.collapsed:focus-within .community-server-item .unread-badge {
   display: inline-block;
 }
 
-.community-rail.collapsed:hover .pin-btn,
+.community-rail.collapsed.reveal-ready .pin-btn,
 .community-rail.collapsed:focus-within .pin-btn {
   display: block;
 }
 
-.community-rail.collapsed:hover .rail-presence-btn,
+.community-rail.collapsed.reveal-ready .rail-presence-btn,
 .community-rail.collapsed:focus-within .rail-presence-btn {
   justify-content: flex-start;
   padding: 7px 9px;
 }
 
-.community-rail.collapsed:hover .rail-presence-label,
+.community-rail.collapsed.reveal-ready .rail-presence-label,
 .community-rail.collapsed:focus-within .rail-presence-label {
   display: inline;
 }

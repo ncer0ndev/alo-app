@@ -2040,7 +2040,7 @@ function enterHomeMode() {
   activeServerDetail = null;
   hideMemberHoverCard();
   closeTextChannel();
-  communityRail.classList.remove('collapsed');
+  communityRail.classList.remove('collapsed', 'reveal-ready');
   railHomeBtn.classList.add('active');
   homeArea.classList.remove('hidden');
   communityArea.classList.add('hidden');
@@ -2051,6 +2051,7 @@ function enterHomeMode() {
 
 function enterCommunityMode() {
   communityRail.classList.add('collapsed');
+  communityRail.classList.remove('reveal-ready');
   railHomeBtn.classList.remove('active');
   homeArea.classList.add('hidden');
   communityArea.classList.remove('hidden');
@@ -4071,6 +4072,21 @@ joinServerCodeInput.addEventListener('keydown', (e) => {
 });
 serverBackBtn.addEventListener('click', closeServerDetail);
 serverSettingsGearBtn.addEventListener('click', closeTextChannel);
+// Taskbar'a kuculmus rayin uzerinde fare beklerken, genislik gecisi
+// (0.28s) bitmeden icerik gorunur olmasin - aksi halde metin ara
+// genisliklerde satira bolunup kisa sureli cirkin bir zipliyor gorunum
+// ve gecici bir kaydirma cubugu ortaya cikariyordu.
+let railRevealTimer = null;
+communityRail.addEventListener('mouseenter', () => {
+  if (!communityRail.classList.contains('collapsed')) return;
+  clearTimeout(railRevealTimer);
+  railRevealTimer = setTimeout(() => communityRail.classList.add('reveal-ready'), 280);
+});
+communityRail.addEventListener('mouseleave', () => {
+  clearTimeout(railRevealTimer);
+  communityRail.classList.remove('reveal-ready');
+});
+
 railHomeBtn.addEventListener('click', enterHomeMode);
 joinTitlebarHomeBtn.addEventListener('click', enterHomeMode);
 roomTitlebarHomeBtn.addEventListener('click', () => {
