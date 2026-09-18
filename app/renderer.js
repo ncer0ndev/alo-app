@@ -128,7 +128,6 @@ const createChannelNameInput = document.getElementById('create-channel-name-inpu
 const createChannelBtn = document.getElementById('create-channel-btn');
 
 const serverTextChannelView = document.getElementById('server-text-channel-view');
-const textChannelBackBtn = document.getElementById('text-channel-back-btn');
 const textChannelNameEl = document.getElementById('text-channel-name');
 const textChannelLoadState = document.getElementById('text-channel-load-state');
 const textChannelLoadMessage = document.getElementById('text-channel-load-message');
@@ -1965,7 +1964,6 @@ function renderServerDetail() {
 
   serverInviteSection.classList.toggle('hidden', !isOwner);
   if (isOwner) serverInviteCodeEl.textContent = d.inviteCode;
-  serverSettingsGearBtn.classList.toggle('hidden', !isOwner);
 
   createChannelSection.classList.toggle('hidden', !isOwner && !isMod);
   leaveServerBtn.classList.toggle('hidden', isOwner);
@@ -2070,10 +2068,11 @@ function renderServerDetail() {
     main.append(name, preview);
     li.append(icon, main);
 
+    const inThisChannel = currentRoomCode === `CH${c.id}`;
     const joinChBtn = document.createElement('button');
-    joinChBtn.className = 'btn';
-    joinChBtn.textContent = '[ KATIL ]';
-    joinChBtn.onclick = () => joinServerVoiceChannel(d.id, c.id, c.name);
+    joinChBtn.className = inThisChannel ? 'btn btn-ghost' : 'btn';
+    joinChBtn.textContent = inThisChannel ? '[ AYRIL ]' : '[ KATIL ]';
+    joinChBtn.onclick = inThisChannel ? () => leaveRoom() : () => joinServerVoiceChannel(d.id, c.id, c.name);
     li.append(joinChBtn);
 
     if (isOwner || isMod) {
@@ -2092,7 +2091,22 @@ function renderServerDetail() {
 
   serverMembersList.innerHTML = '';
   hideMemberHoverCard();
-  for (const m of d.members) {
+  const roleGroups = [
+    ['owner', 'SAHİP'],
+    ['moderator', 'MODERATÖR'],
+    ['member', 'ÜYE'],
+  ];
+  for (const [role, label] of roleGroups) {
+    const groupMembers = d.members.filter((m) => m.role === role);
+    if (groupMembers.length === 0) continue;
+    const head = document.createElement('li');
+    head.className = 'server-member-group-head';
+    head.textContent = `${label} — ${groupMembers.length}`;
+    serverMembersList.appendChild(head);
+    for (const m of groupMembers) serverMembersList.appendChild(buildMemberRow(m));
+  }
+
+  function buildMemberRow(m) {
     profileAvatars.remember(m.username, m.avatarId);
     profileBanners.remember(m.username, m.bannerId);
     const li = document.createElement('li');
@@ -2152,7 +2166,7 @@ function renderServerDetail() {
       actions.append(blockBtn, reportBtn);
     }
 
-    serverMembersList.appendChild(li);
+    return li;
   }
 }
 
@@ -2526,7 +2540,11 @@ async function performJoinServerVoiceChannel(serverId, channelId, channelName) {
 
   updateDirectCallUI('server-channel', channelName);
   roomAccessSection.classList.add('hidden');
-  showScreen(roomScreen);
+  // Ekran degismez: kanal barinin altinda kendi profilin gorunur (ses
+  // kanali listesi 'server-channel-count' ile zaten kendini de icerir),
+  // tam oda ekranina "ODAYA DÖN" ile istege bagli gecilir.
+  updateActiveCallBar();
+  if (activeServerDetail && activeServerDetail.id === serverId) renderServerDetail();
   renderParticipants();
   applyChatHistory(ack.chatHistory);
   applyMicMode();
@@ -3729,8 +3747,6 @@ loadServerBansBtn.addEventListener('click', loadServerBans);
 loadServerAuditBtn.addEventListener('click', loadServerAuditLog);
 leaveServerBtn.addEventListener('click', leaveServer);
 deleteServerBtn.addEventListener('click', deleteServer);
-
-textChannelBackBtn.addEventListener('click', closeTextChannel);
 
 textChannelRetryBtn.addEventListener('click', () => {
   if (currentTextChannel) openTextChannel(currentTextChannel.serverId, currentTextChannel.channelId, currentTextChannel.name);
