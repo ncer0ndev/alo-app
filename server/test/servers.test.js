@@ -275,13 +275,31 @@ test('topluluk canli durumu: uye cevrimici bilgisi ve ses kanali kisi sayisi anl
 
   const ownerCount = event(owner.socket, 'server-channel-count');
   assert.equal((await emit(owner.socket, 'join-server-channel', { channelId: channel.id })).ok, true);
-  assert.deepEqual(await ownerCount, { serverId: created.id, channelId: channel.id, memberCount: 1 });
+  assert.deepEqual(await ownerCount, {
+    serverId: created.id,
+    channelId: channel.id,
+    memberCount: 1,
+    members: [{ username: 'liveOwner', avatarId: 'panda' }],
+  });
 
   const joinedCount = event(owner.socket, 'server-channel-count');
   assert.equal((await emit(member.socket, 'join-server-channel', { channelId: channel.id })).ok, true);
-  assert.deepEqual(await joinedCount, { serverId: created.id, channelId: channel.id, memberCount: 2 });
+  assert.deepEqual(await joinedCount, {
+    serverId: created.id,
+    channelId: channel.id,
+    memberCount: 2,
+    members: [
+      { username: 'liveOwner', avatarId: 'panda' },
+      { username: 'liveMember', avatarId: 'panda' },
+    ],
+  });
 
   const leftCount = event(owner.socket, 'server-channel-count');
   member.socket.emit('leave-room');
-  assert.deepEqual(await leftCount, { serverId: created.id, channelId: channel.id, memberCount: 1 });
+  assert.deepEqual(await leftCount, {
+    serverId: created.id,
+    channelId: channel.id,
+    memberCount: 1,
+    members: [{ username: 'liveOwner', avatarId: 'panda' }],
+  });
 });

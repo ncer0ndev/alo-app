@@ -38,6 +38,8 @@ const myGameStatusEl = document.getElementById('my-game-status');
 const statusMessageInput = document.getElementById('status-message-input');
 const saveStatusBtn = document.getElementById('save-status-btn');
 const statusMessageStatusEl = document.getElementById('status-message-status');
+const visibilityRadios = document.querySelectorAll('input[name="visibility-select"]');
+const visibilityStatusEl = document.getElementById('visibility-status');
 
 const roomCodeDisplay = document.getElementById('room-code-display');
 const copyCodeBtn = document.getElementById('copy-code-btn');
@@ -90,6 +92,8 @@ const chatSendBtn = document.getElementById('chat-send-btn');
 const appShell = document.querySelector('.app-shell');
 const communityRail = document.getElementById('community-rail');
 const railHomeBtn = document.getElementById('rail-home-btn');
+const joinTitlebarHomeBtn = document.getElementById('join-titlebar-home-btn');
+const roomTitlebarHomeBtn = document.getElementById('room-titlebar-home-btn');
 const homeArea = document.getElementById('home-area');
 const communityArea = document.getElementById('community-area');
 const serverDetailView = document.getElementById('server-detail-view');
@@ -106,6 +110,7 @@ const serversLoadState = document.getElementById('servers-load-state');
 const serversLoadMessage = document.getElementById('servers-load-message');
 const serversRetryBtn = document.getElementById('servers-retry-btn');
 const serverBackBtn = document.getElementById('server-back-btn');
+const serverSettingsGearBtn = document.getElementById('server-settings-gear-btn');
 const serverDetailNameEl = document.getElementById('server-detail-name');
 const serverDetailIcon = document.getElementById('server-detail-icon');
 const serverInviteSection = document.getElementById('server-invite-section');
@@ -136,6 +141,14 @@ const textChannelSendBtn = document.getElementById('text-channel-send-btn');
 const serverMembersList = document.getElementById('server-members-list');
 const serverMembersPanel = document.getElementById('server-members-panel');
 const serverMembersCountEl = document.getElementById('server-members-count');
+const memberHoverCard = document.getElementById('member-hover-card');
+const memberHoverBanner = document.getElementById('member-hover-banner');
+const memberHoverAvatarWrap = document.getElementById('member-hover-avatar-wrap');
+const memberHoverName = document.getElementById('member-hover-name');
+const memberHoverDot = document.getElementById('member-hover-dot');
+const memberHoverRole = document.getElementById('member-hover-role');
+const memberHoverStatus = document.getElementById('member-hover-status');
+const memberHoverGame = document.getElementById('member-hover-game');
 const serverDetailLoadState = document.getElementById('server-detail-load-state');
 const serverDetailLoadMessage = document.getElementById('server-detail-load-message');
 const serverDetailRetryBtn = document.getElementById('server-detail-retry-btn');
@@ -192,7 +205,7 @@ const runInBackgroundCheckbox = document.getElementById('run-in-background-check
 const launchAtLoginCheckbox = document.getElementById('launch-at-login-checkbox');
 
 const PTT_KEY_OPTIONS = window.api?.pttKeyOptions || ['Space'];
-const VALID_THEMES = ['terminal', 'newsprint'];
+const VALID_THEMES = ['terminal', 'newsprint', 'kinetic'];
 
 let socket = null;
 let localStream = null;
@@ -388,6 +401,7 @@ async function authRequest(endpoint) {
 
 function enterJoinScreen(username) {
   profileAvatars.setAccount(username);
+  profileBanners.setAccount(username);
   setAuthStatus('');
   welcomeText.textContent = `[OK] oturum açıldı: ${username}`;
   profileUsernameEl.textContent = `kullanıcı: ${username}`;
@@ -817,6 +831,7 @@ function renderFriends(friends, incoming, outgoing) {
   friendsEmptyEl.classList.toggle('hidden', friends.length > 0);
   for (const friend of friends) {
     profileAvatars.remember(friend.username, friend.avatarId);
+    profileBanners.remember(friend.username, friend.bannerId);
     const li = document.createElement('li');
     li.className = 'friend-row';
     li.dataset.username = friend.username.toLowerCase();
@@ -1810,6 +1825,7 @@ async function joinServerByCode() {
 
 function enterHomeMode() {
   activeServerDetail = null;
+  hideMemberHoverCard();
   closeTextChannel();
   communityRail.classList.remove('collapsed');
   railHomeBtn.classList.add('active');
@@ -1870,6 +1886,71 @@ function closeServerDetail() {
   enterHomeMode();
 }
 
+function renderVoiceChannelMembers(row, members) {
+  let list = row.querySelector('.server-channel-voice-members');
+  if (!members || members.length === 0) {
+    if (list) list.remove();
+    return;
+  }
+  if (!list) {
+    list = document.createElement('ul');
+    list.className = 'server-channel-voice-members';
+    row.appendChild(list);
+  }
+  list.innerHTML = '';
+  for (const m of members) {
+    profileAvatars.remember(m.username, m.avatarId);
+    const item = document.createElement('li');
+    item.className = 'server-channel-voice-member';
+    const nameSpan = document.createElement('span');
+    nameSpan.className = 'name';
+    nameSpan.textContent = m.username;
+    item.append(profileAvatars.image(m.username), nameSpan);
+    list.appendChild(item);
+  }
+}
+
+function formatGameDuration(sinceMs) {
+  if (!sinceMs) return '';
+  const minutes = Math.max(0, Math.floor((Date.now() - sinceMs) / 60000));
+  if (minutes < 1) return 'az önce başladı';
+  if (minutes < 60) return `${minutes} dakikadır`;
+  const hours = Math.floor(minutes / 60);
+  const rest = minutes % 60;
+  return rest > 0 ? `${hours} sa ${rest} dk'dır` : `${hours} saattir`;
+}
+
+function showMemberHoverCard(row, username) {
+  if (!activeServerDetail) return;
+  const m = activeServerDetail.members.find((item) => item.username.toLowerCase() === username.toLowerCase());
+  if (!m) return;
+  memberHoverBanner.style.background = profileBanners.elementForId(m.bannerId || 'none').style.background;
+  memberHoverAvatarWrap.replaceChildren(profileAvatars.image(m.username));
+  memberHoverName.textContent = m.username;
+  memberHoverDot.className = `server-member-presence${m.online ? ' online' : ''}`;
+  memberHoverRole.textContent = serverRoleLabel(m.role);
+  memberHoverStatus.textContent = m.statusMessage || (m.online ? 'Çevrimiçi' : 'Çevrimdışı');
+  if (m.game) {
+    memberHoverGame.textContent = `🎮 ${m.game} · ${formatGameDuration(m.gameSince)}`;
+    memberHoverGame.classList.remove('hidden');
+  } else {
+    memberHoverGame.classList.add('hidden');
+  }
+
+  const rowRect = row.getBoundingClientRect();
+  memberHoverCard.classList.remove('hidden');
+  const cardRect = memberHoverCard.getBoundingClientRect();
+  const left = Math.max(8, rowRect.left - cardRect.width - 10);
+  let top = rowRect.top;
+  if (top + cardRect.height > window.innerHeight - 8) top = window.innerHeight - cardRect.height - 8;
+  memberHoverCard.style.left = `${left}px`;
+  memberHoverCard.style.top = `${Math.max(8, top)}px`;
+}
+
+function hideMemberHoverCard() {
+  memberHoverCard.classList.add('hidden');
+}
+
 function renderServerDetail() {
   if (!activeServerDetail) return;
   const d = activeServerDetail;
@@ -1884,6 +1965,7 @@ function renderServerDetail() {
 
   serverInviteSection.classList.toggle('hidden', !isOwner);
   if (isOwner) serverInviteCodeEl.textContent = d.inviteCode;
+  serverSettingsGearBtn.classList.toggle('hidden', !isOwner);
 
   createChannelSection.classList.toggle('hidden', !isOwner && !isMod);
   leaveServerBtn.classList.toggle('hidden', isOwner);
@@ -1922,6 +2004,9 @@ function renderServerDetail() {
   for (const c of textChannels) {
     const li = document.createElement('li');
     li.className = 'server-channel-row server-channel-row--text';
+    if (currentTextChannel && currentTextChannel.serverId === d.id && currentTextChannel.channelId === c.id) {
+      li.classList.add('active');
+    }
     li.dataset.channelId = String(c.id);
     li.tabIndex = 0;
     li.setAttribute('role', 'button');
@@ -2000,12 +2085,16 @@ function renderServerDetail() {
       appendChannelManagementActions(li, c, d.channels);
     }
 
+    renderVoiceChannelMembers(li, c.members);
+
     serverVoiceChannelsList.appendChild(li);
   }
 
   serverMembersList.innerHTML = '';
+  hideMemberHoverCard();
   for (const m of d.members) {
     profileAvatars.remember(m.username, m.avatarId);
+    profileBanners.remember(m.username, m.bannerId);
     const li = document.createElement('li');
     li.className = 'server-member-row';
     li.dataset.username = m.username.toLowerCase();
@@ -2025,6 +2114,8 @@ function renderServerDetail() {
     const actions = document.createElement('div');
     actions.className = 'server-member-actions';
     li.append(profileAvatars.image(m.username), presence, main, actions);
+    li.addEventListener('mouseenter', () => showMemberHoverCard(li, m.username));
+    li.addEventListener('mouseleave', hideMemberHoverCard);
 
     if (isOwner && m.role !== 'owner') {
       const roleBtn = document.createElement('button');
@@ -2104,14 +2195,27 @@ function updateCommunityMemberPresence({ serverId, username, online }) {
   }
 }
 
-function updateServerChannelCount({ serverId, channelId, memberCount }) {
+function updateCommunityMemberGameStatus({ serverId, username, game, gameSince }) {
+  if (!activeServerDetail || activeServerDetail.id !== Number(serverId) || typeof username !== 'string') return;
+  const member = activeServerDetail.members.find((item) => item.username.toLowerCase() === username.toLowerCase());
+  if (member) {
+    member.game = game || null;
+    member.gameSince = gameSince || null;
+  }
+}
+
+function updateServerChannelCount({ serverId, channelId, memberCount, members }) {
   if (!activeServerDetail || activeServerDetail.id !== Number(serverId)) return;
   const channel = activeServerDetail.channels.find((item) => item.id === Number(channelId));
-  if (channel) channel.memberCount = Number(memberCount) || 0;
+  if (channel) {
+    channel.memberCount = Number(memberCount) || 0;
+    channel.members = members || [];
+  }
   const row = serverVoiceChannelsList.querySelector(`[data-channel-id="${Number(channelId)}"]`);
   if (!row) return;
   const preview = row.querySelector('.preview');
   if (preview) preview.textContent = `${Number(memberCount) || 0} kişi`;
+  renderVoiceChannelMembers(row, members);
   row.classList.remove('count-updated');
   requestAnimationFrame(() => row.classList.add('count-updated'));
   setTimeout(() => row.classList.remove('count-updated'), 500);
@@ -2454,6 +2558,9 @@ function closeTextChannel() {
   seenServerMessageIds.clear();
   textChannelAutoScroll = true;
   textChannelHasMoreHistory = true;
+  for (const row of serverTextChannelsList.children) {
+    row.classList.remove('active');
+  }
   showServerChannelsView();
 }
 
@@ -2550,6 +2657,9 @@ async function openTextChannel(serverId, channelId, channelName) {
   textChannelNameEl.textContent = channelName;
   serverChannelsView.classList.add('hidden');
   serverTextChannelView.classList.remove('hidden');
+  for (const row of serverTextChannelsList.children) {
+    row.classList.toggle('active', row.dataset.channelId === String(channelId));
+  }
   renderTextChannelLog();
 
   textChannelLoadState.className = 'community-detail-state';
@@ -2979,12 +3089,14 @@ function connectSocket() {
     }
   });
 
-  socket.on('authenticated', ({ username, avatarId }) => {
+  socket.on('authenticated', ({ username, avatarId, bannerId }) => {
     profileAvatars.setAccount(username, avatarId);
+    profileBanners.setAccount(username, bannerId);
     loadFriends();
   });
-  socket.on('profile-updated', ({ username, avatarId }) => {
-    profileAvatars.remember(username, avatarId);
+  socket.on('profile-updated', ({ username, avatarId, bannerId }) => {
+    if (avatarId) profileAvatars.remember(username, avatarId);
+    if (bannerId !== undefined) profileBanners.remember(username, bannerId);
   });
 
   socket.on('disconnect', () => {
@@ -3107,6 +3219,7 @@ function connectSocket() {
   });
 
   socket.on('server-member-presence', updateCommunityMemberPresence);
+  socket.on('server-member-game-status', updateCommunityMemberGameStatus);
   socket.on('server-channel-count', updateServerChannelCount);
   socket.on('server-updated', ({ serverId, name, iconId }) => {
     if (activeServerDetail && activeServerDetail.id === Number(serverId)) {
@@ -3263,7 +3376,11 @@ async function loadOwnStatusMessage() {
   try {
     const res = await fetch(`${getServerUrl()}/api/me`, { headers: { Authorization: `Bearer ${token}` } });
     const data = await res.json();
-    if (res.ok) statusMessageInput.value = data.statusMessage || '';
+    if (res.ok) {
+      statusMessageInput.value = data.statusMessage || '';
+      const visibility = data.visibility === 'invisible' ? 'invisible' : 'online';
+      visibilityRadios.forEach((radio) => { radio.checked = radio.value === visibility; });
+    }
   } catch {
     // sessizce yoksay
   }
@@ -3281,6 +3398,17 @@ async function saveStatusMessage() {
   } catch (err) {
     statusMessageStatusEl.textContent = err.message;
     statusMessageStatusEl.className = 'status-line error';
+  }
+}
+
+async function saveVisibility(visibility) {
+  try {
+    await apiRequest('/api/profile/visibility', { visibility });
+    visibilityStatusEl.textContent = visibility === 'invisible' ? '[OK] çevrimdışı görüneceksin' : '[OK] aktif görüneceksin';
+    visibilityStatusEl.className = 'status-line ok';
+  } catch (err) {
+    visibilityStatusEl.textContent = err.message;
+    visibilityStatusEl.className = 'status-line error';
   }
 }
 
@@ -3499,6 +3627,11 @@ saveStatusBtn.addEventListener('click', saveStatusMessage);
 statusMessageInput.addEventListener('keydown', (e) => {
   if (e.key === 'Enter') saveStatusBtn.click();
 });
+visibilityRadios.forEach((radio) => {
+  radio.addEventListener('change', () => {
+    if (radio.checked) saveVisibility(radio.value);
+  });
+});
 addFriendBtn.addEventListener('click', addFriend);
 joinBtn.addEventListener('click', joinRoom);
 createRoomBtn.addEventListener('click', createRoom);
@@ -3572,7 +3705,13 @@ joinServerCodeInput.addEventListener('keydown', (e) => {
   if (e.key === 'Enter') joinServerBtn.click();
 });
 serverBackBtn.addEventListener('click', closeServerDetail);
+serverSettingsGearBtn.addEventListener('click', closeTextChannel);
 railHomeBtn.addEventListener('click', enterHomeMode);
+joinTitlebarHomeBtn.addEventListener('click', enterHomeMode);
+roomTitlebarHomeBtn.addEventListener('click', () => {
+  showScreen(joinScreen);
+  enterHomeMode();
+});
 serversRetryBtn.addEventListener('click', loadServersList);
 serverDetailRetryBtn.addEventListener('click', () => {
   const serverId = Number(serverDetailRetryBtn.dataset.serverId);

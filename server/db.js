@@ -38,6 +38,12 @@ async function createSchema() {
   if (!columns.rows.some((column) => column.name === 'status_message')) {
     await client.execute("ALTER TABLE users ADD COLUMN status_message TEXT NOT NULL DEFAULT ''");
   }
+  if (!columns.rows.some((column) => column.name === 'visibility')) {
+    await client.execute("ALTER TABLE users ADD COLUMN visibility TEXT NOT NULL DEFAULT 'online'");
+  }
+  if (!columns.rows.some((column) => column.name === 'banner_id')) {
+    await client.execute("ALTER TABLE users ADD COLUMN banner_id TEXT NOT NULL DEFAULT ''");
+  }
   await client.execute(`
     CREATE TABLE IF NOT EXISTS friendships (
       user_a_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -500,6 +506,14 @@ async function setStatusMessage(userId, statusMessage) {
   await client.execute({ sql: 'UPDATE users SET status_message = ? WHERE id = ?', args: [statusMessage, userId] });
 }
 
+async function setVisibility(userId, visibility) {
+  await client.execute({ sql: 'UPDATE users SET visibility = ? WHERE id = ?', args: [visibility, userId] });
+}
+
+async function setBanner(userId, bannerId) {
+  await client.execute({ sql: 'UPDATE users SET banner_id = ? WHERE id = ?', args: [bannerId, userId] });
+}
+
 // ---- sunucular (topluluklar) ----
 
 function generateInviteCode() {
@@ -591,7 +605,7 @@ async function listServersForUser(userId) {
 
 async function listServerMembers(serverId) {
   const res = await client.execute({
-    sql: `SELECT u.id, u.username, u.avatar_id, m.role FROM server_members m
+    sql: `SELECT u.id, u.username, u.avatar_id, u.banner_id, u.status_message, m.role FROM server_members m
           JOIN users u ON u.id = m.user_id
           WHERE m.server_id = ?
           ORDER BY m.joined_at ASC`,
@@ -955,6 +969,8 @@ module.exports = {
     await client.execute({ sql: 'UPDATE users SET avatar_id = ? WHERE id = ?', args: [avatarId, userId] });
   },
   setStatusMessage,
+  setVisibility,
+  setBanner,
   usingRemote,
   init,
   createUser,

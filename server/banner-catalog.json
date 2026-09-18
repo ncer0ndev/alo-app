@@ -1,0 +1,11 @@
+[
+  { "id": "none", "label": "Yok" },
+  { "id": "matrix", "label": "Matrix" },
+  { "id": "sunset", "label": "Gün Batımı" },
+  { "id": "ember", "label": "Kor" },
+  { "id": "ocean", "label": "Okyanus" },
+  { "id": "violet", "label": "Mor Sis" },
+  { "id": "gold", "label": "Altın" },
+  { "id": "ice", "label": "Buz" },
+  { "id": "toxic", "label": "Toksik" }
+]

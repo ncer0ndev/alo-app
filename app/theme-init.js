@@ -1,5 +1,5 @@
 (function () {
-  var VALID_THEMES = ['terminal', 'newsprint'];
+  var VALID_THEMES = ['terminal', 'newsprint', 'kinetic'];
   var theme = 'terminal';
   try {
     var stored = localStorage.getItem('theme');

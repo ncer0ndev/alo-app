@@ -9,6 +9,7 @@ const rateLimit = require('express-rate-limit');
 
 const db = require('./db');
 const avatarCatalog = require('./avatar-catalog.json');
+const bannerCatalog = require('./banner-catalog.json');
 function publicAvatar(user) {
   const id = user?.avatar_id;
   if (id === 'phoenix' && user?.username?.toLowerCase() !== 'necr0n') return 'panda';
@@ -85,7 +86,12 @@ const rooms = new Map(); // roomCode -> { members, createdAt, messages, seenClie
 const onlineUsers = new Map(); // usernameLower -> Set<socketId>
 const pendingCalls = new Map(); // roomCode -> { callerSocketId, calleeSocketId, timeoutHandle }
 const ownerActiveRoom = new Map(); // ownerUserId -> roomCode (sadece sahibin fiilen odada oldugu 'room' tipi odalar)
-const gameStatusByUsername = new Map(); // usernameLower -> oyun adi (aninlik, kalici degil, opsiyonel/opt-in)
+const gameStatusByUsername = new Map(); // usernameLower -> { game, since } (aninlik, kalici degil, opsiyonel/opt-in)
+
+function gameStatusFields(usernameKey) {
+  const entry = gameStatusByUsername.get(usernameKey);
+  return { game: entry?.game || null, gameSince: entry?.since || null };
+}
 
 function addOnlineSocket(key, socketId) {
   let set = onlineUsers.get(key);
@@ -109,8 +115,16 @@ function removeOnlineSocket(key, socketId) {
   return false;
 }
 
+// Bir kullanicinin baglantisi olsa bile "gorunmez" (invisible) tercihi
+// secmisse arkadaslarina/topluluklarina cevrimdisi gibi gorunur.
 function isUserOnline(username) {
-  return onlineUsers.has(username.toLowerCase());
+  const set = onlineUsers.get(username.toLowerCase());
+  if (!set) return false;
+  for (const socketId of set) {
+    const socket = io.sockets.sockets.get(socketId);
+    if (socket && socket.data.visibility !== 'invisible') return true;
+  }
+  return false;
 }
 
 function emitToUser(username, event, payload) {
@@ -141,12 +155,32 @@ async function notifyCommunityPresence(userId, username, online) {
   }
 }
 
+async function notifyCommunityGameStatus(userId, username, game, gameSince) {
+  for (const community of await db.listServersForUser(userId)) {
+    await emitToServerMembers(community.id, 'server-member-game-status', {
+      serverId: community.id,
+      username,
+      game,
+      gameSince,
+    });
+  }
+}
+
+function channelRoomMembers(room) {
+  if (!room) return [];
+  return [...room.members].map((sid) => {
+    const data = io.sockets.sockets.get(sid)?.data || {};
+    return { username: data.username || 'Bilinmeyen', avatarId: data.avatarId || 'panda' };
+  });
+}
+
 function publishServerChannelCount(room) {
   if (!room || room.type !== 'server-channel') return;
   emitToServerMembers(room.serverId, 'server-channel-count', {
     serverId: room.serverId,
     channelId: room.channelId,
     memberCount: room.members.size,
+    members: channelRoomMembers(room),
   }).catch((err) => console.error('kanal kisi sayisi yayinlanamadi:', err.message));
 }
 
@@ -392,7 +426,13 @@ app.post(
 app.get('/api/me', requireAuth, asyncRoute(async (req, res) => {
   const user = await db.getUserById(req.userId);
   if (!user) return res.status(401).json({ error: 'gecersiz oturum' });
-  res.json({ username: user.username, avatarId: publicAvatar(user), statusMessage: user.status_message || '' });
+  res.json({
+    username: user.username,
+    avatarId: publicAvatar(user),
+    statusMessage: user.status_message || '',
+    visibility: user.visibility === 'invisible' ? 'invisible' : 'online',
+    bannerId: user.banner_id || '',
+  });
 }));
 
 app.post('/api/profile/avatar', requireAuth, friendLimiter, asyncRoute(async (req, res) => {
@@ -409,6 +449,30 @@ app.post('/api/profile/avatar', requireAuth, friendLimiter, asyncRoute(async (re
   for (const sid of recipients) {
     const active = io.sockets.sockets.get(sid);
     if (active) active.data.avatarId = avatarId;
+  }
+  for (const friend of await db.listFriends(user.id)) {
+    for (const sid of onlineUsers.get(friend.username.toLowerCase()) || []) recipients.add(sid);
+  }
+  for (const room of rooms.values()) {
+    if ([...room.members].some((sid) => io.sockets.sockets.get(sid)?.data.userId === user.id)) {
+      for (const sid of room.members) recipients.add(sid);
+    }
+  }
+  for (const sid of recipients) io.to(sid).emit('profile-updated', payload);
+  res.json(payload);
+}));
+
+app.post('/api/profile/banner', requireAuth, friendLimiter, asyncRoute(async (req, res) => {
+  const user = await db.getUserById(req.userId);
+  if (!user) return res.status(401).json({ error: 'gecersiz oturum' });
+  const { bannerId } = req.body || {};
+  if (!bannerCatalog.some((banner) => banner.id === bannerId)) return res.status(400).json({ error: 'Gecersiz banner.' });
+  await db.setBanner(user.id, bannerId);
+  const payload = { username: user.username, bannerId };
+  const recipients = new Set(onlineUsers.get(user.username.toLowerCase()) || []);
+  for (const sid of recipients) {
+    const active = io.sockets.sockets.get(sid);
+    if (active) active.data.bannerId = bannerId;
   }
   for (const friend of await db.listFriends(user.id)) {
     for (const sid of onlineUsers.get(friend.username.toLowerCase()) || []) recipients.add(sid);
@@ -457,6 +521,33 @@ app.post('/api/profile/status', requireAuth, friendLimiter, asyncRoute(async (re
   }
   for (const sid of recipients) io.to(sid).emit('friend-status-message', payload);
   res.json(payload);
+}));
+
+app.post('/api/profile/visibility', requireAuth, friendLimiter, asyncRoute(async (req, res) => {
+  const user = await db.getUserById(req.userId);
+  if (!user) return res.status(401).json({ error: 'gecersiz oturum' });
+  const { visibility } = req.body || {};
+  if (visibility !== 'online' && visibility !== 'invisible') {
+    return res.status(400).json({ error: 'gecersiz durum' });
+  }
+  const wasVisible = isUserOnline(user.username);
+  await db.setVisibility(user.id, visibility);
+  const usernameKey = user.username.toLowerCase();
+  for (const sid of onlineUsers.get(usernameKey) || []) {
+    const active = io.sockets.sockets.get(sid);
+    if (active) active.data.visibility = visibility;
+  }
+  // Bu degisiklik baskalarinin gordugu cevrimici/cevrimdisi durumunu fiilen
+  // degistiriyorsa (yalnizca kullanici o an bagliysa gecerli), arkadaslara
+  // ve topluluklara ayni "friend-online"/"friend-offline" olaylariyla
+  // haber verilir - istemci tarafinda ekstra bir dinleyici gerekmez.
+  const isNowVisible = isUserOnline(user.username);
+  if (wasVisible !== isNowVisible) {
+    const event = isNowVisible ? 'friend-online' : 'friend-offline';
+    notifyFriends(user.id, event, { username: user.username }).catch((err) => console.error(err.message));
+    notifyCommunityPresence(user.id, user.username, isNowVisible).catch((err) => console.error(err.message));
+  }
+  res.json({ ok: true, visibility });
 }));
 
 const METERED_ICE_CACHE_MS = 60 * 60 * 1000; // Metered kimlik bilgileri saatlerce gecerli; her istekte cekmeye gerek yok.
@@ -519,10 +610,11 @@ app.get(
     const friends = friendRows.map((f) => ({
       username: f.username,
       avatarId: publicAvatar(f),
+      bannerId: f.banner_id || '',
       online: isUserOnline(f.username),
       roomOpen: !!getOpenRoomForUser(f.id),
       statusMessage: f.status_message || '',
-      game: gameStatusByUsername.get(f.username.toLowerCase()) || null,
+      ...gameStatusFields(f.username.toLowerCase()),
     }));
     const incoming = (await db.listIncomingRequests(req.userId)).map((u) => u.username);
     const outgoing = (await db.listOutgoingRequests(req.userId)).map((u) => u.username);
@@ -833,7 +925,15 @@ app.delete(
 // her zaman sunucuda server_members tablosundan okunur, istemciye guvenilmez.
 
 function publicServerMember(row) {
-  return { username: row.username, avatarId: publicAvatar(row), role: row.role, online: isUserOnline(row.username) };
+  return {
+    username: row.username,
+    avatarId: publicAvatar(row),
+    bannerId: row.banner_id || '',
+    statusMessage: row.status_message || '',
+    ...gameStatusFields(row.username.toLowerCase()),
+    role: row.role,
+    online: isUserOnline(row.username),
+  };
 }
 
 async function requireServerMembership(req, res, serverId) {
@@ -930,7 +1030,14 @@ app.get(
       channels: channels.map((c) =>
         c.type === 'text'
           ? { id: c.id, name: c.name, type: 'text', position: Number(c.position), unreadCount: unreadByChannel.get(c.id) || 0 }
-          : { id: c.id, name: c.name, type: 'voice', position: Number(c.position), memberCount: rooms.get(`CH${c.id}`)?.members.size || 0 }
+          : {
+              id: c.id,
+              name: c.name,
+              type: 'voice',
+              position: Number(c.position),
+              memberCount: rooms.get(`CH${c.id}`)?.members.size || 0,
+              members: channelRoomMembers(rooms.get(`CH${c.id}`)),
+            }
       ),
     });
   })
@@ -1327,6 +1434,8 @@ io.use(async (socket, next) => {
     socket.data.userId = payload.userId;
     socket.data.username = user.username;
     socket.data.avatarId = publicAvatar(user);
+    socket.data.bannerId = user.banner_id || '';
+    socket.data.visibility = user.visibility === 'invisible' ? 'invisible' : 'online';
     next();
   } catch {
     next(new Error('unauthorized'));
@@ -1344,8 +1453,8 @@ io.on('connection', (socket) => {
   const seenDmClientIds = new Map();
 
   const cameOnline = addOnlineSocket(usernameKey, socket.id);
-  socket.emit('authenticated', { username, avatarId: socket.data.avatarId });
-  if (cameOnline) {
+  socket.emit('authenticated', { username, avatarId: socket.data.avatarId, bannerId: socket.data.bannerId });
+  if (cameOnline && socket.data.visibility !== 'invisible') {
     notifyFriends(userId, 'friend-online', { username }).catch((err) => console.error(err.message));
     notifyCommunityPresence(userId, username, true).catch((err) => console.error(err.message));
   }
@@ -1835,14 +1944,17 @@ io.on('connection', (socket) => {
     const { game } = payload || {};
     const clean = typeof game === 'string' ? game.trim().slice(0, 60) : '';
     const existing = gameStatusByUsername.get(usernameKey);
+    let since = null;
     if (clean) {
-      if (existing === clean) return; // gereksiz tekrar yayin yok
-      gameStatusByUsername.set(usernameKey, clean);
+      if (existing?.game === clean) return; // gereksiz tekrar yayin yok
+      since = Date.now();
+      gameStatusByUsername.set(usernameKey, { game: clean, since });
     } else {
       if (!existing) return;
       gameStatusByUsername.delete(usernameKey);
     }
-    notifyFriends(userId, 'friend-game-status', { username, game: clean || null }).catch((err) => console.error(err.message));
+    notifyFriends(userId, 'friend-game-status', { username, game: clean || null, gameSince: since }).catch((err) => console.error(err.message));
+    notifyCommunityGameStatus(userId, username, clean || null, since).catch((err) => console.error(err.message));
   });
 
   socket.on('disconnect', () => {
@@ -1868,7 +1980,8 @@ io.on('connection', (socket) => {
       notifyCommunityPresence(userId, username, false).catch((err) => console.error(err.message));
       if (gameStatusByUsername.has(usernameKey)) {
         gameStatusByUsername.delete(usernameKey);
-        notifyFriends(userId, 'friend-game-status', { username, game: null }).catch((err) => console.error(err.message));
+        notifyFriends(userId, 'friend-game-status', { username, game: null, gameSince: null }).catch((err) => console.error(err.message));
+        notifyCommunityGameStatus(userId, username, null, null).catch((err) => console.error(err.message));
       }
     }
   });

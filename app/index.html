@@ -14,6 +14,22 @@
 
   <div id="toast" class="toast hidden" role="status" aria-live="polite"></div>
 
+  <div id="member-hover-card" class="member-hover-card hidden" role="tooltip">
+    <div id="member-hover-banner" class="user-banner"></div>
+    <div class="member-hover-body">
+      <div id="member-hover-avatar-wrap"></div>
+      <div class="member-hover-info">
+        <div class="member-hover-name-row">
+          <span id="member-hover-name"></span>
+          <span id="member-hover-dot" class="server-member-presence"></span>
+        </div>
+        <div id="member-hover-role" class="member-hover-role"></div>
+        <div id="member-hover-status" class="member-hover-status"></div>
+        <div id="member-hover-game" class="member-hover-game hidden"></div>
+      </div>
+    </div>
+  </div>
+
   <div id="active-call-bar" class="active-call-bar hidden">
     <span id="active-call-text"></span>
     <button id="return-to-call-btn" class="btn">[ ODAYA DÖN ]</button>
@@ -71,7 +87,7 @@
     </div>
 
     <div id="join-screen" class="window hidden">
-      <div class="window-titlebar">--- menu.sh ---</div>
+      <div class="window-titlebar">--- menu.sh ---<button id="join-titlebar-home-btn" class="titlebar-home-btn" aria-label="Ana sayfa" title="Ana sayfa">⌂</button></div>
       <div class="window-body">
         <p id="welcome-text" class="status-line ok"></p>
 
@@ -160,7 +176,7 @@
             <div id="dm-log" class="chat-log" role="log" aria-live="polite"></div>
             <button id="dm-scroll-btn" class="btn btn-ghost chat-scroll-btn hidden">[ YENİ MESAJLAR ▾ ]</button>
             <div class="chat-input-row">
-              <textarea id="dm-input" class="chat-input" placeholder="mesaj yaz... (Enter: gönder, Shift+Enter: yeni satır)" maxlength="2000" rows="1"></textarea>
+              <textarea id="dm-input" class="chat-input" placeholder="Mesaj yaz..." maxlength="2000" rows="1"></textarea>
               <button id="dm-send-btn" class="btn">[ GÖNDER ]</button>
             </div>
           </div>
@@ -212,6 +228,17 @@
               <span class="theme-option-head">
                 <input type="radio" name="theme-select" value="newsprint" />
                 <span class="theme-option-name">Gazete</span>
+              </span>
+            </label>
+            <label class="theme-option">
+              <span class="theme-preview theme-preview-kinetic" aria-hidden="true">
+                <span class="theme-preview-bar"></span>
+                <span class="theme-preview-line"></span>
+                <span class="theme-preview-line short"></span>
+              </span>
+              <span class="theme-option-head">
+                <input type="radio" name="theme-select" value="kinetic" />
+                <span class="theme-option-name">Kinetic</span>
               </span>
             </label>
           </div>
@@ -327,6 +354,11 @@
           <div id="avatar-grid" class="avatar-grid" role="group" aria-label="Profil resmi seçimi"></div>
           <p id="avatar-status" class="status-line" role="status" aria-live="polite"></p>
 
+          <div class="section-header">// banner seç</div>
+          <div id="profile-banner-preview" class="profile-banner-preview"></div>
+          <div id="banner-grid" class="banner-grid" role="group" aria-label="Banner seçimi"></div>
+          <p id="banner-status" class="status-line" role="status" aria-live="polite"></p>
+
           <div class="section-header">// durum mesajı</div>
           <label class="field">
             <span class="prompt">durum:</span>
@@ -334,6 +366,17 @@
           </label>
           <button id="save-status-btn" class="btn btn-block">[ DURUMU KAYDET ]</button>
           <p id="status-message-status" class="status-line"></p>
+
+          <div class="section-header">// çevrimiçi durumu</div>
+          <label class="radio-row">
+            <input type="radio" name="visibility-select" value="online" checked />
+            <span>Aktif</span>
+          </label>
+          <label class="radio-row">
+            <input type="radio" name="visibility-select" value="invisible" />
+            <span>Çevrimdışı görün</span>
+          </label>
+          <p id="visibility-status" class="status-line"></p>
 
           <div class="section-header">// şifre değiştir</div>
           <label class="field">
@@ -362,6 +405,41 @@
           </div>
 
           <div id="community-area" class="community-area hidden">
+            <aside id="server-channel-rail" class="server-channel-rail" aria-label="Kanallar">
+              <div class="server-channel-rail-head">
+                <span class="community-kicker">KANALLAR</span>
+                <button id="server-settings-gear-btn" class="server-settings-gear-btn hidden" aria-label="Topluluk ayarları" title="Topluluk ayarları">⚙</button>
+              </div>
+
+              <div class="server-channel-group">
+                <div class="server-channel-group-head">METİN KANALLARI</div>
+                <ul id="server-text-channels-list" class="server-channel-list"></ul>
+                <p id="server-text-channels-empty" class="community-empty hidden">Henüz metin kanalı yok.</p>
+              </div>
+
+              <div class="server-channel-group">
+                <div class="server-channel-group-head">SES KANALLARI</div>
+                <ul id="server-voice-channels-list" class="server-channel-list"></ul>
+                <p id="server-voice-channels-empty" class="community-empty hidden">Henüz sesli kanal yok.</p>
+              </div>
+
+              <details id="create-channel-section" class="community-action-panel hidden">
+                <summary>+ Kanal ekle</summary>
+                <label class="compact-field">
+                  <span>TÜR</span>
+                  <select id="create-channel-type-select">
+                    <option value="text" selected># metin</option>
+                    <option value="voice">ses</option>
+                  </select>
+                </label>
+                <label class="compact-field">
+                  <span>YENİ KANAL</span>
+                  <input id="create-channel-name-input" type="text" maxlength="40" placeholder="kanal adı" />
+                </label>
+                <button id="create-channel-btn" class="btn btn-block">[ + EKLE ]</button>
+              </details>
+            </aside>
+
             <section class="community-main" aria-live="polite">
               <div id="server-detail-load-state" class="community-detail-state hidden" role="status">
                 <div class="community-welcome-mark" aria-hidden="true">···</div>
@@ -380,39 +458,6 @@
                 </header>
 
                 <div id="server-channels-view">
-                <div class="server-channel-toolbar">
-                  <div>
-                    <span class="community-kicker">KANALLAR</span>
-                    <p>Metin kanalları kalıcı yazışma, sesli kanallar görüşme içindir.</p>
-                  </div>
-                  <div id="create-channel-section" class="server-create-channel hidden">
-                    <label class="compact-field">
-                      <span>TÜR</span>
-                      <select id="create-channel-type-select">
-                        <option value="text" selected># metin</option>
-                        <option value="voice">ses</option>
-                      </select>
-                    </label>
-                    <label class="compact-field">
-                      <span>YENİ KANAL</span>
-                      <input id="create-channel-name-input" type="text" maxlength="40" placeholder="kanal adı" />
-                    </label>
-                    <button id="create-channel-btn" class="btn btn-ghost">[ + EKLE ]</button>
-                  </div>
-                </div>
-
-                <div class="server-channel-group">
-                  <div class="server-channel-group-head">METİN KANALLARI</div>
-                  <ul id="server-text-channels-list" class="server-channel-list"></ul>
-                  <p id="server-text-channels-empty" class="community-empty hidden">Henüz metin kanalı yok.</p>
-                </div>
-
-                <div class="server-channel-group">
-                  <div class="server-channel-group-head">SES KANALLARI</div>
-                  <ul id="server-voice-channels-list" class="server-channel-list"></ul>
-                  <p id="server-voice-channels-empty" class="community-empty hidden">Henüz sesli kanal yok.</p>
-                </div>
-
                 <div class="server-admin-panel">
                   <div id="server-invite-section" class="hidden">
                     <span class="community-kicker">DAVET KODU · YALNIZCA SAHİP</span>
@@ -452,7 +497,7 @@
 
               <div id="server-text-channel-view" class="server-text-channel hidden">
                 <div class="server-text-channel-header">
-                  <button id="text-channel-back-btn" class="btn btn-ghost">[ ◂ KANALLAR ]</button>
+                  <button id="text-channel-back-btn" class="btn btn-ghost">[ ◂ TOPLULUK AYARLARI ]</button>
                   <span id="text-channel-name" class="server-text-channel-title"></span>
                 </div>
 
@@ -469,7 +514,7 @@
                   <textarea
                     id="text-channel-input"
                     class="chat-input"
-                    placeholder="mesaj yaz... (Enter: gönder, Shift+Enter: yeni satır)"
+                    placeholder="Mesaj yaz..."
                     maxlength="2000"
                     rows="1"
                   ></textarea>
@@ -494,7 +539,7 @@
     </div>
 
     <div id="room-screen" class="window hidden">
-      <div class="window-titlebar">--- room ---</div>
+      <div class="window-titlebar">--- room ---<button id="room-titlebar-home-btn" class="titlebar-home-btn" aria-label="Ana sayfa" title="Ana sayfaya dön (görüşme sürer)">⌂</button></div>
       <div class="window-body">
         <div class="room-code-row">
           <span class="prompt">oda kodu:</span>
@@ -531,7 +576,7 @@
         <div id="chat-log" class="chat-log" role="log" aria-live="polite"></div>
         <button id="chat-scroll-btn" class="btn btn-ghost chat-scroll-btn hidden">[ YENİ MESAJLAR ▾ ]</button>
         <div class="chat-input-row">
-          <textarea id="chat-input" class="chat-input" placeholder="mesaj yaz... (Enter: gönder, Shift+Enter: yeni satır)" maxlength="2000" rows="1"></textarea>
+          <textarea id="chat-input" class="chat-input" placeholder="Mesaj yaz..." maxlength="2000" rows="1"></textarea>
           <button id="chat-send-btn" class="btn">[ GÖNDER ]</button>
         </div>
       </div>
@@ -541,6 +586,8 @@
   <script src="vendor/socket.io.min.js"></script>
   <script src="avatar-catalog.js"></script>
   <script src="avatars.js"></script>
+  <script src="banner-catalog.js"></script>
+  <script src="banners.js"></script>
   <script src="renderer.js"></script>
 
 </body>
