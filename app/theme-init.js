@@ -1,5 +1,5 @@
 (function () {
-  var VALID_THEMES = ['terminal', 'newsprint', 'kinetic', 'modern'];
+  var VALID_THEMES = ['terminal', 'newsprint', 'kinetic'];
   var theme = 'terminal';
   try {
     var stored = localStorage.getItem('theme');
@@ -7,5 +7,14 @@
   } catch (err) {
     theme = 'terminal';
   }
-  document.documentElement.setAttribute('data-theme', theme);
+
+  var uiMode = 'classic';
+  try {
+    if (localStorage.getItem('uiMode') === 'modern') uiMode = 'modern';
+  } catch (err) {
+    uiMode = 'classic';
+  }
+
+  document.documentElement.setAttribute('data-theme', uiMode === 'modern' ? 'modern' : theme);
+  document.documentElement.setAttribute('data-ui', uiMode);
 })();

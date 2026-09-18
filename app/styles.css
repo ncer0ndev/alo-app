@@ -348,6 +348,91 @@
   box-shadow: 6px 6px 0 #000;
 }
 
+/* data-ui='modern': renkten (data-theme) bagimsiz, salt YAPISAL bir mod - ana
+   sayfadaki yatay sekme cubugunu, topluluk rayinin yanina kalici, dikey bir
+   ikinci navigasyon sutununa donusturur (Discord/Slack tarzi 3 sutunlu kabuk).
+   renderer.js'teki hicbir eleman tasinmiyor/kopyalanmiyor; ayni .tab-bar ve
+   .tab-content kardesleri .home-area icinde flex-direction:row ile yeniden
+   duzenleniyor. Ayarlar'daki switch acikken data-theme otomatik olarak
+   'modern' oluyor (bkz. renderer.js applyUiMode), bu yuzden renk taraf
+   zaten yukaridaki [data-theme='modern'] bloklariyla geliyor. */
+[data-ui='modern'] .chrome-deco {
+  display: none;
+}
+
+[data-ui='modern'] .home-area {
+  display: flex;
+  flex-direction: row;
+  align-items: stretch;
+  padding: 0;
+  overflow: hidden;
+}
+
+[data-ui='modern'] .home-area .tab-bar,
+[data-ui='modern'] .home-area .tab-content {
+  max-width: none;
+}
+
+[data-ui='modern'] .tab-bar {
+  flex: 0 0 190px;
+  width: 190px;
+  height: 100%;
+  flex-direction: column;
+  align-items: stretch;
+  flex-wrap: nowrap;
+  gap: 4px;
+  margin: 0;
+  padding: 16px 10px;
+  border-bottom: none;
+  border-right: 3px solid #000;
+  background: color-mix(in srgb, var(--bg) 88%, var(--panel));
+  overflow-y: auto;
+}
+
+[data-ui='modern'] .tab-btn {
+  flex: 0 0 auto;
+  width: 100%;
+  min-width: 0;
+  justify-content: flex-start;
+  text-align: left;
+  padding: 10px 12px;
+  border: 3px solid transparent;
+}
+
+[data-ui='modern'] .tab-btn:hover {
+  border-color: #000;
+}
+
+[data-ui='modern'] .tab-btn.active {
+  border-color: #000;
+  box-shadow: 3px 3px 0 var(--accent);
+}
+
+[data-ui='modern'] .tab-btn::before {
+  margin-right: 8px;
+}
+
+[data-ui='modern'] .tab-btn[data-tab='friends']::before { content: '◈'; }
+[data-ui='modern'] .tab-btn[data-tab='dm']::before { content: '✉'; }
+[data-ui='modern'] .tab-btn[data-tab='create']::before { content: '＋'; }
+[data-ui='modern'] .tab-btn[data-tab='join']::before { content: '⇥'; }
+[data-ui='modern'] .tab-btn[data-tab='settings']::before { content: '⚙'; }
+[data-ui='modern'] .tab-btn[data-tab='profile']::before { content: '◐'; }
+[data-ui='modern'] .tab-btn[data-tab='notepad']::before { content: '✎'; }
+[data-ui='modern'] .tab-btn[data-tab='admin']::before { content: '★'; }
+
+[data-ui='modern'] .tab-content {
+  flex: 1 1 auto;
+  min-width: 0;
+  height: 100%;
+  overflow-y: auto;
+  padding: 24px 28px;
+}
+
+[data-ui='modern'] .community-rail {
+  border-right: 3px solid #000;
+}
+
 * {
   box-sizing: border-box;
   scrollbar-width: thin;
@@ -1219,6 +1304,81 @@ textarea:focus-visible,
   font-size: 11px;
 }
 
+.ui-mode-switch-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 18px;
+  padding: 12px;
+  border: 1px solid var(--border);
+  cursor: pointer;
+}
+
+.ui-mode-switch-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.ui-mode-switch-title {
+  font-family: var(--font-ui);
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--fg);
+}
+
+.ui-mode-switch-hint {
+  font-family: var(--font-body);
+  font-size: 11px;
+  color: var(--dim);
+}
+
+.ui-mode-switch {
+  position: relative;
+  flex: 0 0 auto;
+}
+
+.ui-mode-switch input {
+  position: absolute;
+  inset: 0;
+  margin: 0;
+  opacity: 0;
+  cursor: pointer;
+}
+
+.ui-mode-switch-track {
+  display: block;
+  width: 44px;
+  height: 24px;
+  border: 1px solid var(--border);
+  background: var(--bg);
+  transition: background-color 0.15s ease;
+}
+
+.ui-mode-switch-thumb {
+  display: block;
+  width: 16px;
+  height: 16px;
+  margin: 3px;
+  background: var(--dim);
+  transition: transform 0.15s ease, background-color 0.15s ease;
+}
+
+.ui-mode-switch input:checked + .ui-mode-switch-track {
+  background: var(--accent);
+}
+
+.ui-mode-switch input:checked + .ui-mode-switch-track .ui-mode-switch-thumb {
+  transform: translateX(20px);
+  background: var(--bg);
+}
+
+.ui-mode-switch input:focus-visible + .ui-mode-switch-track {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
 .theme-options {
   display: flex;
   gap: 12px;
@@ -1337,30 +1497,6 @@ textarea:focus-visible,
 .theme-preview-kinetic .theme-preview-line.short {
   width: 45%;
   background: #dfe104;
-  opacity: 1;
-}
-
-.theme-preview-modern {
-  background: #fffdf5;
-  border-color: #000;
-}
-
-.theme-preview-modern .theme-preview-bar {
-  background: #000000;
-  height: 8px;
-  width: 60%;
-}
-
-.theme-preview-modern .theme-preview-line {
-  background: #ff6b6b;
-  height: 3px;
-  width: 90%;
-  opacity: 1;
-}
-
-.theme-preview-modern .theme-preview-line.short {
-  width: 45%;
-  background: #ffd93d;
   opacity: 1;
 }
 

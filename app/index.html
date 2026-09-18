@@ -87,7 +87,7 @@
 
   <main class="terminal">
     <div id="auth-screen" class="window">
-      <div class="window-titlebar">--- login.sh ---</div>
+      <div class="window-titlebar"><span class="chrome-deco">--- </span>login.sh<span class="chrome-deco"> ---</span></div>
       <div class="window-body">
         <label class="field">
           <span class="prompt">user@alo:~$</span>
@@ -106,7 +106,7 @@
     </div>
 
     <div id="join-screen" class="window hidden">
-      <div class="window-titlebar">--- menu.sh ---<button id="join-titlebar-home-btn" class="titlebar-home-btn" aria-label="Ana sayfa" title="Ana sayfa">⌂</button></div>
+      <div class="window-titlebar"><span class="chrome-deco">--- </span>menu.sh<span class="chrome-deco"> ---</span><button id="join-titlebar-home-btn" class="titlebar-home-btn" aria-label="Ana sayfa" title="Ana sayfa">⌂</button></div>
       <div class="window-body">
         <p id="welcome-text" class="status-line ok"></p>
 
@@ -239,6 +239,18 @@
         </div>
 
         <div id="tab-settings" class="tab-content hidden">
+          <div class="section-header">// arayüz</div>
+          <label class="ui-mode-switch-row">
+            <span class="ui-mode-switch-copy">
+              <span class="ui-mode-switch-title">Modern arayüz</span>
+              <span class="ui-mode-switch-hint">Kalıcı yan menülü, sade bir düzene geçer.</span>
+            </span>
+            <span class="ui-mode-switch">
+              <input type="checkbox" id="ui-mode-toggle" />
+              <span class="ui-mode-switch-track" aria-hidden="true"><span class="ui-mode-switch-thumb"></span></span>
+            </span>
+          </label>
+
           <div class="section-header">// görünüm</div>
           <div class="theme-options" role="radiogroup" aria-label="Tema seç">
             <label class="theme-option">
@@ -272,17 +284,6 @@
               <span class="theme-option-head">
                 <input type="radio" name="theme-select" value="kinetic" />
                 <span class="theme-option-name">Kinetic</span>
-              </span>
-            </label>
-            <label class="theme-option">
-              <span class="theme-preview theme-preview-modern" aria-hidden="true">
-                <span class="theme-preview-bar"></span>
-                <span class="theme-preview-line"></span>
-                <span class="theme-preview-line short"></span>
-              </span>
-              <span class="theme-option-head">
-                <input type="radio" name="theme-select" value="modern" />
-                <span class="theme-option-name">Modern</span>
               </span>
             </label>
           </div>
@@ -606,7 +607,7 @@
     </div>
 
     <div id="room-screen" class="window hidden">
-      <div class="window-titlebar">--- room ---<button id="room-titlebar-home-btn" class="titlebar-home-btn" aria-label="Ana sayfa" title="Ana sayfaya dön (görüşme sürer)">⌂</button></div>
+      <div class="window-titlebar"><span class="chrome-deco">--- </span>room<span class="chrome-deco"> ---</span><button id="room-titlebar-home-btn" class="titlebar-home-btn" aria-label="Ana sayfa" title="Ana sayfaya dön (görüşme sürer)">⌂</button></div>
       <div class="window-body">
         <div class="room-code-row">
           <span class="prompt">oda kodu:</span>

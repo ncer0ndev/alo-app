@@ -208,6 +208,8 @@ const pttKeyStatusEl = document.getElementById('ptt-key-status');
 const micLevelBar = document.getElementById('mic-level-bar');
 const micTestBtn = document.getElementById('mic-test-btn');
 const themeRadios = document.querySelectorAll('input[name="theme-select"]');
+const themeOptionsGroup = document.querySelector('.theme-options');
+const uiModeToggle = document.getElementById('ui-mode-toggle');
 
 const notifyCallCheckbox = document.getElementById('notify-call-checkbox');
 const ringtoneEnabledCheckbox = document.getElementById('ringtone-enabled-checkbox');
@@ -223,7 +225,7 @@ const runInBackgroundCheckbox = document.getElementById('run-in-background-check
 const launchAtLoginCheckbox = document.getElementById('launch-at-login-checkbox');
 
 const PTT_KEY_OPTIONS = window.api?.pttKeyOptions || ['Space'];
-const VALID_THEMES = ['terminal', 'newsprint', 'kinetic', 'modern'];
+const VALID_THEMES = ['terminal', 'newsprint', 'kinetic'];
 
 let socket = null;
 let localStream = null;
@@ -375,11 +377,32 @@ function getTheme() {
 
 function applyTheme(theme) {
   const safeTheme = VALID_THEMES.includes(theme) ? theme : 'terminal';
-  document.documentElement.setAttribute('data-theme', safeTheme);
   localStorage.setItem('theme', safeTheme);
+  if (getUiMode() !== 'modern') {
+    document.documentElement.setAttribute('data-theme', safeTheme);
+  }
   themeRadios.forEach((radio) => {
     radio.checked = radio.value === safeTheme;
   });
+}
+
+// ---- arayuz modu (klasik sekme cubugu / modern kalici yan menu) ----
+// Modern arayuz modu, renk temasindan bagimsiz ayri bir eksen (data-ui) ama
+// sabit bicimde neo-brutalist "modern" renk temasiyla eslenir - kullanici
+// klasik moddayken sectigi renk temasi (terminal/gazete/kinetic) ayriyeten
+// hatirlanir ve klasige donulunce geri uygulanir.
+
+function getUiMode() {
+  return localStorage.getItem('uiMode') === 'modern' ? 'modern' : 'classic';
+}
+
+function applyUiMode(mode) {
+  const safeMode = mode === 'modern' ? 'modern' : 'classic';
+  localStorage.setItem('uiMode', safeMode);
+  document.documentElement.setAttribute('data-ui', safeMode);
+  document.documentElement.setAttribute('data-theme', safeMode === 'modern' ? 'modern' : getTheme());
+  if (uiModeToggle) uiModeToggle.checked = safeMode === 'modern';
+  if (themeOptionsGroup) themeOptionsGroup.classList.toggle('hidden', safeMode === 'modern');
 }
 
 function showScreen(screen) {
@@ -529,6 +552,8 @@ function initSettingsTab() {
   themeRadios.forEach((radio) => {
     radio.checked = radio.value === currentTheme;
   });
+  if (uiModeToggle) uiModeToggle.checked = getUiMode() === 'modern';
+  if (themeOptionsGroup) themeOptionsGroup.classList.toggle('hidden', getUiMode() === 'modern');
 
   const settings = getSettings();
   micModeRadios.forEach((radio) => {
@@ -4266,6 +4291,12 @@ themeRadios.forEach((radio) => {
   });
 });
 
+if (uiModeToggle) {
+  uiModeToggle.addEventListener('change', () => {
+    applyUiMode(uiModeToggle.checked ? 'modern' : 'classic');
+  });
+}
+
 roomAccessRadios.forEach((radio) => {
   radio.addEventListener('change', () => {
     if (!radio.checked || !socket || !currentRoomCode || !currentRoomIsOwner) return;
@@ -4420,6 +4451,7 @@ newPasswordInput.addEventListener('keydown', (e) => {
 // sadece localStorage'daki degeri (gecersizse) kalici olarak duzeltiyoruz ve
 // ayarlar sekmesindeki radyo butonlarini senkronize ediyoruz.
 applyTheme(getTheme());
+applyUiMode(getUiMode());
 
 if (window.api) window.api.setBackgroundPref(getSettings().runInBackground);
 if (window.api) window.api.setGameDetectionEnabled(getSettings().gameDetectionEnabled);
