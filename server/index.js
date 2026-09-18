@@ -145,6 +145,12 @@ async function emitToServerMembers(serverId, event, payload) {
   }
 }
 
+async function emitToServerModerators(serverId, event, payload) {
+  for (const member of await db.listServerMembers(serverId)) {
+    if (member.role === 'owner' || member.role === 'moderator') emitToUser(member.username, event, payload);
+  }
+}
+
 async function notifyCommunityPresence(userId, username, online) {
   for (const community of await db.listServersForUser(userId)) {
     await emitToServerMembers(community.id, 'server-member-presence', {
@@ -1046,6 +1052,14 @@ app.post(
     if (await db.getServerBan(server.id, req.userId)) return res.status(403).json({ error: 'bu topluluktan yasaklandin' });
     const already = await db.getServerMember(server.id, req.userId);
     if (already) return res.status(409).json({ error: 'zaten bu toplulugun uyesisin' });
+    if (server.join_approval_required) {
+      if (await db.getJoinRequest(server.id, req.userId)) {
+        return res.status(409).json({ error: 'katilim istegin zaten gonderildi, onay bekleniyor' });
+      }
+      await db.createJoinRequest(server.id, req.userId, req.userId);
+      await emitToServerModerators(server.id, 'server-join-request', { serverId: server.id, username: req.username });
+      return res.json({ pending: true, id: server.id, name: server.name });
+    }
     await db.addServerMember(server.id, req.userId, 'member');
     await db.addServerAuditLog(server.id, req.userId, 'member_joined', req.username);
     emitToServerMembers(server.id, 'server-members-updated', { serverId: server.id }).catch(() => {});
@@ -1071,6 +1085,7 @@ app.get(
       iconId: ctx.server.icon_id,
       role: ctx.member.role,
       inviteCode: ctx.member.role === 'owner' ? ctx.server.invite_code : undefined,
+      joinApprovalRequired: !!ctx.server.join_approval_required,
       members: members.map(publicServerMember),
       channels: channels.map((c) =>
         c.type === 'text'
@@ -1210,9 +1225,110 @@ app.post(
     if (!isValidServerOrChannelName(name)) return res.status(400).json({ error: 'gecersiz topluluk adi (2-40 karakter)' });
     if (!isValidCommunityIcon(iconId, req.username)) return res.status(400).json({ error: 'gecersiz topluluk simgesi' });
     await db.updateServerProfile(serverId, { name, iconId });
+    if (req.body?.joinApprovalRequired !== undefined) {
+      await db.setServerJoinApproval(serverId, !!req.body.joinApprovalRequired);
+    }
     await db.addServerAuditLog(serverId, req.userId, 'community_updated', name, iconId);
     await emitToServerMembers(serverId, 'server-updated', { serverId, name, iconId });
-    res.json({ ok: true, name, iconId });
+    res.json({ ok: true, name, iconId, joinApprovalRequired: !!req.body?.joinApprovalRequired });
+  })
+);
+
+// Sade bir uye, davet kodunu kopyalamak zorunda kalmadan arkadaslarindan
+// birini toplulugu dogrudan davet edebilir. Topluluk "katilim onayi"
+// istiyorsa bu bir istek olusturur (davet kodu ile katilimla ayni kuyruk),
+// istemiyorsa arkadas dogrudan uye olarak eklenir.
+app.post(
+  '/api/servers/:id/invite-friend',
+  requireAuth,
+  friendLimiter,
+  asyncRoute(async (req, res) => {
+    const serverId = Number(req.params.id);
+    const ctx = await requireServerMembership(req, res, serverId);
+    if (!ctx) return;
+    const targetUsername = req.body?.username;
+    if (!isValidUsername(targetUsername)) return res.status(400).json({ error: 'gecersiz kullanici adi' });
+    const target = await db.getUserByUsername(targetUsername);
+    if (!target) return res.status(404).json({ error: 'kullanici bulunamadi' });
+    if (!(await db.areFriends(req.userId, target.id))) {
+      return res.status(403).json({ error: 'yalnizca arkadaslarini davet edebilirsin' });
+    }
+    if (await db.getServerBan(serverId, target.id)) return res.status(403).json({ error: 'bu kullanici topluluktan yasaklanmis' });
+    if (await db.getServerMember(serverId, target.id)) return res.status(409).json({ error: 'zaten bu toplulugun uyesi' });
+
+    if (ctx.server.join_approval_required) {
+      if (await db.getJoinRequest(serverId, target.id)) {
+        return res.status(409).json({ error: 'bu kullanici icin zaten bekleyen bir istek var' });
+      }
+      await db.createJoinRequest(serverId, target.id, req.userId);
+      await emitToServerModerators(serverId, 'server-join-request', { serverId, username: target.username });
+      emitToUser(target.username, 'server-invite-received', { serverId, serverName: ctx.server.name, fromUsername: req.username, pending: true });
+      return res.json({ ok: true, pending: true });
+    }
+
+    await db.addServerMember(serverId, target.id, 'member');
+    await db.addServerAuditLog(serverId, req.userId, 'member_invited', target.username);
+    emitToServerMembers(serverId, 'server-members-updated', { serverId }).catch(() => {});
+    emitToUser(target.username, 'server-invite-received', { serverId, serverName: ctx.server.name, fromUsername: req.username, pending: false });
+    res.json({ ok: true, pending: false });
+  })
+);
+
+app.get(
+  '/api/servers/:id/join-requests',
+  requireAuth,
+  asyncRoute(async (req, res) => {
+    const serverId = Number(req.params.id);
+    const ctx = await requireServerMembership(req, res, serverId);
+    if (!ctx) return;
+    if (ctx.member.role !== 'owner' && ctx.member.role !== 'moderator') return res.status(403).json({ error: 'yetkin yok' });
+    const rows = await db.listJoinRequests(serverId);
+    res.json({
+      requests: rows.map((r) => ({
+        username: r.username,
+        avatarId: publicAvatar(r),
+        requestedBy: r.requested_by_username,
+        createdAt: Number(r.created_at),
+      })),
+    });
+  })
+);
+
+app.post(
+  '/api/servers/:id/join-requests/:username/approve',
+  requireAuth,
+  friendLimiter,
+  asyncRoute(async (req, res) => {
+    const serverId = Number(req.params.id);
+    const ctx = await requireServerMembership(req, res, serverId);
+    if (!ctx) return;
+    if (ctx.member.role !== 'owner' && ctx.member.role !== 'moderator') return res.status(403).json({ error: 'yetkin yok' });
+    const target = await db.getUserByUsername(req.params.username);
+    if (!target || !(await db.getJoinRequest(serverId, target.id))) return res.status(404).json({ error: 'istek bulunamadi' });
+    await db.deleteJoinRequest(serverId, target.id);
+    await db.addServerMember(serverId, target.id, 'member');
+    await db.addServerAuditLog(serverId, req.userId, 'join_request_approved', target.username);
+    emitToServerMembers(serverId, 'server-members-updated', { serverId }).catch(() => {});
+    emitToUser(target.username, 'server-join-approved', { serverId, serverName: ctx.server.name });
+    res.json({ ok: true });
+  })
+);
+
+app.post(
+  '/api/servers/:id/join-requests/:username/deny',
+  requireAuth,
+  friendLimiter,
+  asyncRoute(async (req, res) => {
+    const serverId = Number(req.params.id);
+    const ctx = await requireServerMembership(req, res, serverId);
+    if (!ctx) return;
+    if (ctx.member.role !== 'owner' && ctx.member.role !== 'moderator') return res.status(403).json({ error: 'yetkin yok' });
+    const target = await db.getUserByUsername(req.params.username);
+    if (!target || !(await db.getJoinRequest(serverId, target.id))) return res.status(404).json({ error: 'istek bulunamadi' });
+    await db.deleteJoinRequest(serverId, target.id);
+    await db.addServerAuditLog(serverId, req.userId, 'join_request_denied', target.username);
+    emitToUser(target.username, 'server-join-denied', { serverId, serverName: ctx.server.name });
+    res.json({ ok: true });
   })
 );
 

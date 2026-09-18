@@ -165,7 +165,16 @@ const serverTransferSelect = document.getElementById('server-transfer-select');
 const transferServerBtn = document.getElementById('transfer-server-btn');
 const loadServerBansBtn = document.getElementById('load-server-bans-btn');
 const loadServerAuditBtn = document.getElementById('load-server-audit-btn');
+const loadJoinRequestsBtn = document.getElementById('load-join-requests-btn');
 const serverManagementList = document.getElementById('server-management-list');
+const joinApprovalRadios = document.querySelectorAll('input[name="join-approval-select"]');
+const serverInviteEnvelopeBtn = document.getElementById('server-invite-envelope-btn');
+const inviteFriendModal = document.getElementById('invite-friend-modal');
+const inviteFriendCloseBtn = document.getElementById('invite-friend-close-btn');
+const inviteFriendHint = document.getElementById('invite-friend-hint');
+const inviteFriendList = document.getElementById('invite-friend-list');
+const inviteFriendEmpty = document.getElementById('invite-friend-empty');
+const inviteFriendStatus = document.getElementById('invite-friend-status');
 const blockedUsersList = document.getElementById('blocked-users-list');
 const blockedUsersEmpty = document.getElementById('blocked-users-empty');
 const adminReportsList = document.getElementById('admin-reports-list');
@@ -2007,8 +2016,13 @@ async function joinServerByCode() {
   if (!inviteCode) return;
   try {
     const data = await apiRequest('/api/servers/join', { inviteCode });
-    joinServerStatusEl.textContent = '';
     joinServerCodeInput.value = '';
+    if (data.pending) {
+      joinServerStatusEl.textContent = `[OK] "${data.name}" için katılım isteğin gönderildi, onay bekleniyor.`;
+      joinServerStatusEl.className = 'status-line ok';
+      return;
+    }
+    joinServerStatusEl.textContent = '';
     await openServerDetail(data.id);
   } catch (err) {
     joinServerStatusEl.textContent = `[ERROR] ${err.message}`;
@@ -2170,7 +2184,10 @@ function renderServerDetail() {
   deleteServerBtn.classList.toggle('hidden', !isOwner);
   serverManagementSection.classList.toggle('hidden', !isOwner);
   serverModerationSection.classList.toggle('hidden', !isOwner && !isMod);
+  serverInviteEnvelopeBtn.classList.toggle('hidden', d.role !== 'member');
   if (isOwner) {
+    const approvalValue = d.joinApprovalRequired ? 'approval' : 'direct';
+    joinApprovalRadios.forEach((radio) => { radio.checked = radio.value === approvalValue; });
     serverRenameInput.value = d.name;
     serverIconSelect.replaceChildren();
     for (const avatar of window.AVATAR_CATALOG) {
@@ -2484,11 +2501,14 @@ async function moveServerChannel(channelId, direction) {
 
 async function saveServerSettings() {
   if (!activeServerDetail) return;
+  const approvalRadio = [...joinApprovalRadios].find((r) => r.checked);
   try {
     await apiRequest(`/api/servers/${activeServerDetail.id}/settings`, {
       name: serverRenameInput.value.trim(),
       iconId: serverIconSelect.value,
+      joinApprovalRequired: approvalRadio ? approvalRadio.value === 'approval' : undefined,
     });
+    if (approvalRadio) activeServerDetail.joinApprovalRequired = approvalRadio.value === 'approval';
     showToast('topluluk ayarları kaydedildi', 'ok', 2500);
   } catch (err) {
     setServerDetailStatus(err.message, 'error');
@@ -2575,6 +2595,119 @@ async function loadServerAuditLog() {
   } catch (err) {
     setServerDetailStatus(err.message, 'error');
   }
+}
+
+async function loadJoinRequests() {
+  if (!activeServerDetail) return;
+  const { token } = getSession();
+  try {
+    const res = await fetch(`${getServerUrl()}/api/servers/${activeServerDetail.id}/join-requests`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'katılım istekleri alınamadı');
+    serverManagementList.replaceChildren();
+    if (data.requests.length === 0) {
+      const item = document.createElement('li');
+      item.textContent = 'Bekleyen katılım isteği yok.';
+      serverManagementList.appendChild(item);
+      return;
+    }
+    for (const reqItem of data.requests) {
+      const item = document.createElement('li');
+      const text = document.createElement('span');
+      text.textContent =
+        reqItem.requestedBy === reqItem.username
+          ? `${reqItem.username} · davet koduyla katılmak istiyor`
+          : `${reqItem.username} · ${reqItem.requestedBy} tarafından davet edildi`;
+      const approveBtn = document.createElement('button');
+      approveBtn.className = 'btn btn-ghost';
+      approveBtn.textContent = '[ ONAYLA ]';
+      approveBtn.onclick = async () => {
+        try {
+          await apiRequest(`/api/servers/${activeServerDetail.id}/join-requests/${encodeURIComponent(reqItem.username)}/approve`, {});
+          loadJoinRequests();
+        } catch (err) {
+          setServerDetailStatus(err.message, 'error');
+        }
+      };
+      const denyBtn = document.createElement('button');
+      denyBtn.className = 'btn btn-ghost';
+      denyBtn.textContent = '[ REDDET ]';
+      denyBtn.onclick = async () => {
+        try {
+          await apiRequest(`/api/servers/${activeServerDetail.id}/join-requests/${encodeURIComponent(reqItem.username)}/deny`, {});
+          loadJoinRequests();
+        } catch (err) {
+          setServerDetailStatus(err.message, 'error');
+        }
+      };
+      item.append(text, approveBtn, denyBtn);
+      serverManagementList.appendChild(item);
+    }
+  } catch (err) {
+    setServerDetailStatus(err.message, 'error');
+  }
+}
+
+async function openInviteFriendModal() {
+  if (!activeServerDetail) return;
+  inviteFriendStatus.textContent = '';
+  inviteFriendStatus.className = 'status-line';
+  inviteFriendList.innerHTML = '';
+  inviteFriendHint.textContent = `${activeServerDetail.name} topluluğuna arkadaşlarını davet et.`;
+  inviteFriendModal.classList.remove('hidden');
+  const { token } = getSession();
+  try {
+    const res = await fetch(`${getServerUrl()}/api/friends`, { headers: { Authorization: `Bearer ${token}` } });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'arkadaş listesi alınamadı');
+    const memberUsernames = new Set(activeServerDetail.members.map((m) => m.username.toLowerCase()));
+    const invitable = data.friends.filter((f) => !memberUsernames.has(f.username.toLowerCase()));
+    inviteFriendEmpty.classList.toggle('hidden', invitable.length > 0);
+    for (const friend of invitable) {
+      const li = document.createElement('li');
+      li.className = 'friend-row';
+      li.append(profileAvatars.image(friend.username));
+      const main = document.createElement('div');
+      main.className = 'dm-row-main';
+      const name = document.createElement('span');
+      name.className = 'name';
+      name.textContent = friend.username;
+      main.append(name);
+      li.append(main);
+      const inviteBtn = document.createElement('button');
+      inviteBtn.className = 'btn btn-ghost';
+      inviteBtn.textContent = '[ DAVET ET ]';
+      inviteBtn.onclick = () => inviteFriendToServer(friend.username, inviteBtn);
+      li.append(inviteBtn);
+      inviteFriendList.appendChild(li);
+    }
+  } catch (err) {
+    inviteFriendStatus.textContent = err.message;
+    inviteFriendStatus.className = 'status-line error';
+  }
+}
+
+async function inviteFriendToServer(username, btn) {
+  if (!activeServerDetail) return;
+  btn.disabled = true;
+  try {
+    const result = await apiRequest(`/api/servers/${activeServerDetail.id}/invite-friend`, { username });
+    btn.textContent = result.pending ? '[ İSTEK GÖNDERİLDİ ]' : '[ EKLENDİ ]';
+    inviteFriendStatus.textContent = result.pending
+      ? `${username} için katılım isteği gönderildi, onay bekleniyor.`
+      : `${username} topluluğa eklendi.`;
+    inviteFriendStatus.className = 'status-line ok';
+  } catch (err) {
+    btn.disabled = false;
+    inviteFriendStatus.textContent = err.message;
+    inviteFriendStatus.className = 'status-line error';
+  }
+}
+
+function closeInviteFriendModal() {
+  inviteFriendModal.classList.add('hidden');
 }
 
 async function blockUser(username) {
@@ -3959,8 +4092,14 @@ saveServerSettingsBtn.addEventListener('click', saveServerSettings);
 transferServerBtn.addEventListener('click', transferServerOwnership);
 loadServerBansBtn.addEventListener('click', loadServerBans);
 loadServerAuditBtn.addEventListener('click', loadServerAuditLog);
+loadJoinRequestsBtn.addEventListener('click', loadJoinRequests);
 leaveServerBtn.addEventListener('click', leaveServer);
 deleteServerBtn.addEventListener('click', deleteServer);
+serverInviteEnvelopeBtn.addEventListener('click', openInviteFriendModal);
+inviteFriendCloseBtn.addEventListener('click', closeInviteFriendModal);
+inviteFriendModal.addEventListener('click', (event) => {
+  if (event.target === inviteFriendModal) closeInviteFriendModal();
+});
 
 textChannelRetryBtn.addEventListener('click', () => {
   if (currentTextChannel) openTextChannel(currentTextChannel.serverId, currentTextChannel.channelId, currentTextChannel.name);

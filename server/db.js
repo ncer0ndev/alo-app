@@ -93,6 +93,9 @@ async function createSchema() {
   if (!serverColumns.rows.some((column) => column.name === 'icon_id')) {
     await client.execute("ALTER TABLE servers ADD COLUMN icon_id TEXT NOT NULL DEFAULT 'robot'");
   }
+  if (!serverColumns.rows.some((column) => column.name === 'join_approval_required')) {
+    await client.execute('ALTER TABLE servers ADD COLUMN join_approval_required INTEGER NOT NULL DEFAULT 0');
+  }
   await client.execute(`
     CREATE TABLE IF NOT EXISTS server_members (
       server_id INTEGER NOT NULL REFERENCES servers(id) ON DELETE CASCADE,
@@ -112,6 +115,15 @@ async function createSchema() {
       friend_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
       pinned_at INTEGER NOT NULL,
       PRIMARY KEY (user_id, friend_id)
+    )
+  `);
+  await client.execute(`
+    CREATE TABLE IF NOT EXISTS server_join_requests (
+      server_id INTEGER NOT NULL REFERENCES servers(id) ON DELETE CASCADE,
+      user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      requested_by_user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      created_at INTEGER NOT NULL,
+      PRIMARY KEY (server_id, user_id)
     )
   `);
   await client.execute(`
@@ -604,6 +616,54 @@ async function setServerMemberRole(serverId, userId, role) {
   });
 }
 
+async function setServerJoinApproval(serverId, required) {
+  await client.execute({
+    sql: 'UPDATE servers SET join_approval_required = ? WHERE id = ?',
+    args: [required ? 1 : 0, serverId],
+  });
+}
+
+async function createJoinRequest(serverId, userId, requestedByUserId) {
+  try {
+    await client.execute({
+      sql: 'INSERT INTO server_join_requests (server_id, user_id, requested_by_user_id, created_at) VALUES (?, ?, ?, ?)',
+      args: [serverId, userId, requestedByUserId, Date.now()],
+    });
+    return true;
+  } catch (err) {
+    if (isUniqueViolation(err)) return false;
+    throw err;
+  }
+}
+
+async function getJoinRequest(serverId, userId) {
+  const res = await client.execute({
+    sql: 'SELECT * FROM server_join_requests WHERE server_id = ? AND user_id = ?',
+    args: [serverId, userId],
+  });
+  return res.rows[0] || null;
+}
+
+async function deleteJoinRequest(serverId, userId) {
+  await client.execute({
+    sql: 'DELETE FROM server_join_requests WHERE server_id = ? AND user_id = ?',
+    args: [serverId, userId],
+  });
+}
+
+async function listJoinRequests(serverId) {
+  const res = await client.execute({
+    sql: `SELECT jr.created_at, u.id AS user_id, u.username, u.avatar_id, req.username AS requested_by_username
+          FROM server_join_requests jr
+          JOIN users u ON u.id = jr.user_id
+          JOIN users req ON req.id = jr.requested_by_user_id
+          WHERE jr.server_id = ?
+          ORDER BY jr.created_at ASC`,
+    args: [serverId],
+  });
+  return res.rows;
+}
+
 async function listServersForUser(userId) {
   const res = await client.execute({
     sql: `SELECT s.id, s.name, s.icon_id, s.owner_user_id, s.invite_code, s.created_at, m.role
@@ -1035,6 +1095,11 @@ module.exports = {
   addServerMember,
   removeServerMember,
   setServerMemberRole,
+  setServerJoinApproval,
+  createJoinRequest,
+  getJoinRequest,
+  deleteJoinRequest,
+  listJoinRequests,
   listServersForUser,
   listServersForUserWithUnread,
   setServerPinned,

@@ -36,6 +36,19 @@
     </div>
   </div>
 
+  <div id="invite-friend-modal" class="modal-backdrop hidden">
+    <div class="modal-card">
+      <div class="modal-header">
+        <span class="community-kicker">ARKADAŞ DAVET ET</span>
+        <button id="invite-friend-close-btn" class="modal-close-btn" aria-label="Kapat" title="Kapat">✕</button>
+      </div>
+      <p id="invite-friend-hint" class="hint-text"></p>
+      <ul id="invite-friend-list" class="friend-list"></ul>
+      <p id="invite-friend-empty" class="status-line hidden">davet edebileceğin arkadaşın yok</p>
+      <p id="invite-friend-status" class="status-line"></p>
+    </div>
+  </div>
+
   <div id="active-call-bar" class="active-call-bar hidden">
     <span id="active-call-text"></span>
     <button id="return-to-call-btn" class="btn">[ ODAYA DÖN ]</button>
@@ -477,6 +490,7 @@
                     <span class="community-kicker">TOPLULUK</span>
                     <h2 id="server-detail-name"></h2>
                   </div>
+                  <button id="server-invite-envelope-btn" class="server-settings-gear-btn hidden" aria-label="Arkadaş davet et" title="Arkadaş davet et">✉</button>
                   <button id="server-settings-gear-btn" class="server-settings-gear-btn" aria-label="Topluluk ayarları" title="Topluluk ayarları">⚙</button>
                   <button id="server-back-btn" class="btn btn-ghost server-back-btn" aria-label="Ana sayfaya dön">[ ANA SAYFA ]</button>
                 </header>
@@ -501,6 +515,15 @@
                       <label class="compact-field"><span>TOPLULUK ADI</span><input id="server-rename-input" type="text" maxlength="40" /></label>
                       <label class="compact-field"><span>TOPLULUK SİMGESİ</span><select id="server-icon-select"></select></label>
                     </div>
+                    <div class="community-kicker" style="margin-top:10px;">KATILIM</div>
+                    <label class="radio-row">
+                      <input type="radio" name="join-approval-select" value="direct" />
+                      <span>Üyeler arkadaşlarını doğrudan ekleyebilir</span>
+                    </label>
+                    <label class="radio-row">
+                      <input type="radio" name="join-approval-select" value="approval" />
+                      <span>Katılım istekleri yönetici onayından geçsin</span>
+                    </label>
                     <button id="save-server-settings-btn" class="btn btn-ghost">[ AYARLARI KAYDET ]</button>
                     <div class="community-transfer-row">
                       <label class="compact-field"><span>SAHİPLİĞİ DEVRET</span><select id="server-transfer-select"></select></label>
@@ -512,6 +535,7 @@
                     <div class="community-management-actions">
                       <button id="load-server-bans-btn" class="btn btn-ghost">[ YASAKLILAR ]</button>
                       <button id="load-server-audit-btn" class="btn btn-ghost">[ YÖNETİM GÜNLÜĞÜ ]</button>
+                      <button id="load-join-requests-btn" class="btn btn-ghost">[ KATILIM İSTEKLERİ ]</button>
                     </div>
                     <ul id="server-management-list" class="management-list"></ul>
                   </details>
