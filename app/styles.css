@@ -1402,6 +1402,8 @@ textarea:focus-visible,
   position: fixed;
   z-index: 50;
   width: 260px;
+  max-height: calc(100vh - 16px);
+  overflow-y: auto;
   max-height: 220px;
   overflow-y: auto;
   padding: 8px;
@@ -1707,11 +1709,11 @@ textarea:focus-visible,
 .member-hover-card {
   position: fixed;
   z-index: 1200;
-  width: 230px;
+  width: 260px;
   background: var(--panel);
   border: 1px solid var(--border);
   box-shadow: 0 10px 28px rgba(0, 0, 0, 0.45);
-  pointer-events: none;
+  pointer-events: auto;
 }
 
 .member-hover-card.hidden { display: none; }
@@ -1753,6 +1755,84 @@ textarea:focus-visible,
   letter-spacing: 1px;
 }
 
+.member-hover-roles-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-top: 12px;
+  color: var(--dim);
+  font: 700 9px/1 var(--font-data);
+  letter-spacing: 1.2px;
+}
+
+.member-hover-role-add {
+  width: 24px;
+  height: 24px;
+  min-height: 0;
+  padding: 0;
+  display: inline-grid;
+  place-items: center;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  background: color-mix(in srgb, var(--panel) 86%, var(--fg));
+  color: var(--fg);
+  font: 700 16px/1 sans-serif;
+  cursor: pointer;
+}
+
+.member-hover-role-add:hover,
+.member-hover-role-add:focus-visible {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 14%, var(--panel));
+  color: var(--accent);
+}
+
+.member-hover-role-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  min-height: 8px;
+  margin-top: 7px;
+}
+
+.role-badge {
+  max-width: 100%;
+  padding: 3px 7px;
+  overflow: hidden;
+  border: 1px solid currentColor;
+  border-radius: 999px;
+  background: color-mix(in srgb, currentColor 9%, transparent);
+  font-size: 10px;
+  line-height: 1.2;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.member-hover-role-picker {
+  display: grid;
+  gap: 5px;
+  max-height: 158px;
+  margin-top: 8px;
+  padding: 7px;
+  overflow-y: auto;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: color-mix(in srgb, var(--panel) 92%, var(--bg));
+}
+
+.member-hover-role-picker.hidden { display: none; }
+
+.role-picker-item.btn {
+  width: 100%;
+  min-height: 30px;
+  padding: 6px 8px;
+  justify-content: flex-start;
+  border-left-width: 4px;
+  text-align: left;
+  text-transform: none;
+}
+
 .member-hover-status {
   margin-top: 8px;
   color: var(--secondary);
@@ -1765,6 +1845,78 @@ textarea:focus-visible,
   color: var(--accent);
   font-size: 11px;
   word-break: break-word;
+}
+
+.role-builder-intro { max-width: 620px; margin-bottom: 14px; }
+
+.role-builder-fields {
+  align-items: end;
+  margin-bottom: 14px;
+}
+
+.role-builder-fields input[type='color'] {
+  width: 100%;
+  height: 42px;
+  padding: 5px;
+  cursor: pointer;
+}
+
+.role-permission-checks {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  margin: 0 0 14px;
+}
+
+.role-permission-option {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  min-width: 0;
+  padding: 11px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--panel) 94%, var(--fg));
+  cursor: pointer;
+  transition: border-color .16s ease, background .16s ease;
+}
+
+.role-permission-option:hover,
+.role-permission-option:has(input:checked) {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 8%, var(--panel));
+}
+
+.role-permission-option input {
+  width: 17px;
+  height: 17px;
+  flex: 0 0 auto;
+  margin: 1px 0 0;
+  accent-color: var(--accent);
+}
+
+.role-permission-option span {
+  display: grid;
+  min-width: 0;
+  gap: 3px;
+}
+
+.role-permission-option strong {
+  color: var(--fg);
+  font-size: 12px;
+  line-height: 1.25;
+}
+
+.role-permission-option small {
+  color: var(--dim);
+  font-size: 10px;
+  line-height: 1.35;
+}
+
+.role-create-btn { min-width: 132px; }
+
+@media (max-width: 760px) {
+  .role-permission-checks { grid-template-columns: 1fr; }
 }
 
 .modal-backdrop {

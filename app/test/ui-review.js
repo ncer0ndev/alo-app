@@ -59,6 +59,21 @@ document.getElementById('run').onclick = async () => {
       d.querySelector('#toggle-members').click(); await wait(50);
       check(visible('#server-members-panel'), `${width}: üye paneli açılıyor`);
     }
+    const memberRow = d.querySelector('.server-member-row[data-username="deniz"]');
+    const hoverCard = d.querySelector('#member-hover-card');
+    memberRow.dispatchEvent(new w.MouseEvent('mouseenter'));
+    await wait(50);
+    const roleAddButton = d.querySelector('#member-hover-role-grant-btn');
+    check(visible('#member-hover-card') && visible('#member-hover-role-badges'), `${width}: profil kartında roller görünüyor`);
+    check(visible('#member-hover-role-grant-btn') && roleAddButton.textContent.trim() === '+', `${width}: rol ekleme kare artı düğmesinde`);
+    memberRow.dispatchEvent(new w.MouseEvent('mouseleave'));
+    hoverCard.dispatchEvent(new w.MouseEvent('mouseenter'));
+    await wait(220);
+    check(visible('#member-hover-card'), `${width}: satırdan profil kartına geçerken kart kaybolmuyor`);
+    roleAddButton.click();
+    check(visible('#member-hover-role-picker'), `${width}: artı düğmesi rol listesini açıyor`);
+    hoverCard.dispatchEvent(new w.MouseEvent('mouseleave'));
+    await wait(220);
     const memberMenu = d.querySelector('.member-actions-menu');
     check(!!memberMenu && !memberMenu.open, `${width}: üye işlemleri kapalı başlıyor`);
     memberMenu.querySelector('summary').click();

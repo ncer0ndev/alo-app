@@ -37,11 +37,14 @@
           <span id="member-hover-dot" class="server-member-presence"></span>
         </div>
         <div id="member-hover-role" class="member-hover-role"></div>
+        <div class="member-hover-roles-head">
+          <span>ROLLER</span>
+          <button id="member-hover-role-grant-btn" type="button" class="member-hover-role-add hidden" aria-label="Rol ekle" title="Rol ekle">+</button>
+        </div>
         <div id="member-hover-role-badges" class="member-hover-role-badges"></div>
+        <div id="member-hover-role-picker" class="member-hover-role-picker hidden" aria-label="Rol seç"></div>
         <div id="member-hover-status" class="member-hover-status"></div>
         <div id="member-hover-game" class="member-hover-game hidden"></div>
-        <button id="member-hover-role-grant-btn" type="button" class="btn btn-ghost hidden">[ ROL VER ]</button>
-        <div id="member-hover-role-picker" class="member-hover-role-picker hidden"></div>
       </div>
     </div>
   </div>
@@ -595,19 +598,19 @@
                   </details>
                   <details id="server-roles-section" class="community-management hidden">
                     <summary>ROLLER</summary>
-                    <p class="hint-text">Roller gerçek yetkiler taşır. Rol oluşturma yalnızca sana ait; "rol verebilir" yetkisi verdiğin kişiler ise ürettiğin rolleri üyelere atayabilir.</p>
-                    <div class="community-management-grid">
+                    <p class="hint-text role-builder-intro">Topluluk için bir rol oluştur ve bu rolün hangi işlemleri yapabileceğini belirle.</p>
+                    <div class="community-management-grid role-builder-fields">
                       <label class="compact-field"><span>ROL ADI</span><input id="role-name-input" type="text" maxlength="40" /></label>
                       <label class="compact-field"><span>RENK</span><input id="role-color-input" type="color" value="#5865f2" /></label>
                     </div>
                     <div class="role-permission-checks">
-                      <label><input type="checkbox" id="role-perm-kick" /> Üye atabilir</label>
-                      <label><input type="checkbox" id="role-perm-ban" /> Üye yasaklayabilir</label>
-                      <label><input type="checkbox" id="role-perm-channels" /> Kanal oluşturup silebilir</label>
-                      <label><input type="checkbox" id="role-perm-roles" /> Üyelere rol verebilir</label>
-                      <label><input type="checkbox" id="role-perm-messages" /> Başkalarının mesajını silebilir</label>
+                      <label class="role-permission-option"><input type="checkbox" id="role-perm-kick" /><span><strong>Üyeleri çıkar</strong><small>Üyeleri topluluktan ve ses kanalından çıkarabilir.</small></span></label>
+                      <label class="role-permission-option"><input type="checkbox" id="role-perm-ban" /><span><strong>Üyeleri yasakla</strong><small>Üyeleri yasaklayabilir ve yasakları kaldırabilir.</small></span></label>
+                      <label class="role-permission-option"><input type="checkbox" id="role-perm-channels" /><span><strong>Kanalları yönet</strong><small>Kanal oluşturabilir, düzenleyebilir ve silebilir.</small></span></label>
+                      <label class="role-permission-option"><input type="checkbox" id="role-perm-roles" /><span><strong>Rolleri ata</strong><small>Mevcut rolleri topluluk üyelerine verebilir.</small></span></label>
+                      <label class="role-permission-option"><input type="checkbox" id="role-perm-messages" /><span><strong>Mesajları yönet</strong><small>Başkalarının mesajlarını herkesten silebilir.</small></span></label>
                     </div>
-                    <button id="create-role-btn" class="btn btn-ghost">[ ROL OLUŞTUR ]</button>
+                    <button id="create-role-btn" class="btn role-create-btn">Rol oluştur</button>
                     <p id="role-status" class="status-line"></p>
                     <ul id="server-roles-list" class="management-list"></ul>
                   </details>

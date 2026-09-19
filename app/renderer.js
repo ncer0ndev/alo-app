@@ -269,6 +269,7 @@ let currentServerChannelPermissions = null;
 let activeServerDetail = null; // { id, name, role, inviteCode, members, channels }
 let channelEditMode = false; // kalem simgesiyle acilip kapanir; kanal SİL/AD/sirala butonlari yalnizca bu modda gorunur
 let currentTextChannel = null; // { serverId, channelId, name }
+let memberHoverHideTimer = null;
 let textChannelMessages = [];
 let textChannelAutoScroll = true;
 let textChannelLoadingOlder = false;
@@ -2344,9 +2345,20 @@ function toggleRoleGrantPicker(serverId, username, currentRoles, availableRoles)
     memberHoverRolePicker.appendChild(btn);
   }
   memberHoverRolePicker.classList.remove('hidden');
+  requestAnimationFrame(() => {
+    const cardRect = memberHoverCard.getBoundingClientRect();
+    if (cardRect.bottom > window.innerHeight - 8) {
+      const currentTop = Number.parseFloat(memberHoverCard.style.top) || 8;
+      memberHoverCard.style.top = `${Math.max(8, currentTop - (cardRect.bottom - window.innerHeight + 8))}px`;
+    }
+  });
 }
 
 function showHoverCard(anchorEl, info, context = {}) {
+  if (memberHoverHideTimer) {
+    clearTimeout(memberHoverHideTimer);
+    memberHoverHideTimer = null;
+  }
   memberHoverBanner.style.background = profileBanners.element(info.username).style.background;
   memberHoverAvatarWrap.replaceChildren(profileAvatars.image(info.username));
   memberHoverName.textContent = info.username;
@@ -2405,8 +2417,22 @@ function showDmPeerHoverCard(anchorEl, username) {
 }
 
 function hideMemberHoverCard() {
+  if (memberHoverHideTimer) clearTimeout(memberHoverHideTimer);
+  memberHoverHideTimer = null;
   memberHoverCard.classList.add('hidden');
+  memberHoverRolePicker.classList.add('hidden');
 }
+
+function scheduleMemberHoverCardHide() {
+  if (memberHoverHideTimer) clearTimeout(memberHoverHideTimer);
+  memberHoverHideTimer = setTimeout(hideMemberHoverCard, 180);
+}
+
+memberHoverCard.addEventListener('mouseenter', () => {
+  if (memberHoverHideTimer) clearTimeout(memberHoverHideTimer);
+  memberHoverHideTimer = null;
+});
+memberHoverCard.addEventListener('mouseleave', scheduleMemberHoverCardHide);
 
 function renderServerRolesList() {
   if (!activeServerDetail) return;
@@ -2670,7 +2696,7 @@ function renderServerDetail() {
     actions.className = 'server-member-actions';
     li.append(profileAvatars.image(m.username), presence, main, actions);
     li.addEventListener('mouseenter', () => showMemberHoverCard(li, m.username));
-    li.addEventListener('mouseleave', hideMemberHoverCard);
+    li.addEventListener('mouseleave', scheduleMemberHoverCardHide);
 
     if (isOwner && m.role !== 'owner') {
       const roleBtn = document.createElement('button');
