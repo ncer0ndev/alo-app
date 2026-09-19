@@ -3218,7 +3218,7 @@ const MESSAGE_DELETE_FOR_EVERYONE_WINDOW_MS = 5 * 60 * 1000;
 function textMessageDeleteLabel(m) {
   const canModerate = activeServerDetail && (activeServerDetail.role === 'owner' || activeServerDetail.role === 'moderator');
   const withinWindow = Date.now() - m.ts <= MESSAGE_DELETE_FOR_EVERYONE_WINDOW_MS;
-  return canModerate || (m.own && withinWindow) ? '[ SİL ]' : '[ BENDEN SİL ]';
+  return (m.own || canModerate) && withinWindow ? '[ SİL ]' : '[ BENDEN SİL ]';
 }
 
 function scrollTextChannelToBottom() {

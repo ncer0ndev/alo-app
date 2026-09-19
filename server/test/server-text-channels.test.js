@@ -242,6 +242,21 @@ test('metin kanali: normal uye baskasinin mesajini silemez, kendi mesajini sileb
 
   const remaining = await db.getServerMessages(channel.id, owner.userId, { limit: 10 });
   assert.equal(remaining.length, 0);
+
+  // Moderator de 5 dakikayi gecmis bir mesaji artik herkesten silemez, yalnizca kendinden gizler.
+  const oldMsgAck = await emit(member.socket, 'send-server-message', { channelId: channel.id, text: 'eski mesaj moderator', clientMessageId: randomUUID() });
+  assert.equal(oldMsgAck.ok, true);
+  await adapter.query({
+    sql: 'UPDATE server_messages SET created_at = ? WHERE id = ?',
+    args: [Date.now() - 6 * 60 * 1000, oldMsgAck.message.id],
+  });
+  const modLateDelete = await emit(other.socket, 'delete-server-message', { messageId: oldMsgAck.message.id });
+  assert.equal(modLateDelete.ok, true);
+  assert.equal(modLateDelete.mode, 'me', 'moderator de 5 dakikayi gecmis baskasinin mesajini artik herkesten silememeli');
+  const stillThereForMember = await db.getServerMessages(channel.id, member.userId, { limit: 10 });
+  assert.ok(stillThereForMember.some((m) => m.id === oldMsgAck.message.id), 'mesaj sahibi icin hala durmali');
+  const hiddenForModerator = await db.getServerMessages(channel.id, other.userId, { limit: 10 });
+  assert.ok(!hiddenForModerator.some((m) => m.id === oldMsgAck.message.id), 'moderatorun kendi gorunumunden gizlenmis olmali');
 });
 
 test('metin kanali: 5 dakika sonra kendi mesajini artik herkesten silemez, yalnizca kendinden gizleyebilir', { timeout: 20000 }, async () => {
@@ -249,7 +264,11 @@ test('metin kanali: 5 dakika sonra kendi mesajini artik herkesten silemez, yalni
   const base = `http://127.0.0.1:${server.address().port}`;
   const owner = await makeUser(base, 'txtOwner8');
   const member = await makeUser(base, 'txtMember8');
-  const { channel } = await createTextServer(base, owner, member);
+  const created = await (
+    await fetch(`${base}/api/servers`, { method: 'POST', headers: jsonAuth(owner.token), body: JSON.stringify({ name: 'Eski Mesaj Test Toplulugu' }) })
+  ).json();
+  await fetch(`${base}/api/servers/join`, { method: 'POST', headers: jsonAuth(member.token), body: JSON.stringify({ inviteCode: created.inviteCode }) });
+  const channel = { id: created.defaultChannelId };
 
   const msgAck = await emit(member.socket, 'send-server-message', { channelId: channel.id, text: 'eski mesaj', clientMessageId: randomUUID() });
   assert.equal(msgAck.ok, true);

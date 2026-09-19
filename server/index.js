@@ -1960,7 +1960,7 @@ io.on('connection', (socket) => {
       const canModerate = member.role === 'owner' || member.role === 'moderator';
       const withinWindow = Date.now() - Number(message.created_at) <= MESSAGE_DELETE_FOR_EVERYONE_WINDOW_MS;
 
-      if (canModerate || (isOwnMessage && withinWindow)) {
+      if ((isOwnMessage || canModerate) && withinWindow) {
         await db.deleteServerMessage(messageId);
         await db.addServerAuditLog(message.server_id, userId, isOwnMessage ? 'own_message_deleted' : 'message_moderated', message.username, messageId);
         ack({ ok: true, mode: 'everyone' });
