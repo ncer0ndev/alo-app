@@ -6,7 +6,7 @@
   "scripts": {
     "start": "electron .",
     "dist": "electron-builder --win --x64 --publish never",
-    "release:draft": "electron-builder --win --x64 --publish always",
+    "release": "electron-builder --win --x64 --publish always",
     "test:updater": "node --test test/updater.test.js",
     "test:ui": "node test/ui-preview.cjs"
   },
@@ -33,7 +33,7 @@
       "provider": "github",
       "owner": "ncer0ndev",
       "repo": "alo-app",
-      "releaseType": "draft"
+      "releaseType": "release"
     },
     "win": {
       "target": "nsis",

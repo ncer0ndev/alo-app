@@ -1,6 +1,12 @@
-name: Build Windows update (draft)
+name: Publish Windows release
 on:
   workflow_dispatch:
+    inputs:
+      version:
+        description: 'Yayın sürümü (örnek: 1.10.3)'
+        required: true
+        default: '1.10.3'
+        type: string
 permissions:
   contents: write
 jobs:
@@ -17,9 +23,18 @@ jobs:
           cache: npm
           cache-dependency-path: app/package-lock.json
       - run: npm ci
+      - name: Validate and set release version
+        shell: pwsh
+        env:
+          RELEASE_VERSION: ${{ inputs.version }}
+        run: |
+          if ($env:RELEASE_VERSION -notmatch '^\d+\.\d+\.\d+(-[0-9A-Za-z.-]+)?$') {
+            throw "Gecersiz surum: $env:RELEASE_VERSION"
+          }
+          npm version $env:RELEASE_VERSION --no-git-tag-version
       - run: node --test test/updater.test.js
-      - name: Build installer and upload draft release assets
-        run: npm run release:draft
+      - name: Build installer and publish GitHub release
+        run: npm run release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - uses: actions/upload-artifact@v4
