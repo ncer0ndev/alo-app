@@ -784,9 +784,9 @@ app.post(
 );
 
 // ---- Ozel mesajlar (DM) ----
-// Yalnizca mevcut arkadaslar arasinda; kalici (Turso), gonderen her zaman
-// sunucu tarafindan dogrulanan JWT kimligi. Sunucu, istemcinin bildirdigi
-// gonderen bilgisine hicbir zaman guvenmez.
+// Yalnizca mevcut arkadaslar arasinda; kalici (veritabaninda), gonderen her
+// zaman sunucu tarafindan dogrulanan JWT kimligi. Sunucu, istemcinin
+// bildirdigi gonderen bilgisine hicbir zaman guvenmez.
 
 app.get(
   '/api/dm/conversations',
@@ -2161,8 +2161,19 @@ io.on('connection', (socket) => {
 const PORT = process.env.PORT || 3000;
 
 async function start() {
+  try {
+    await db.testConnection();
+  } catch (err) {
+    // Baglanti dizesi/sifre asla loglanmiyor - yalnizca kisa, makine
+    // tarafinda uretilen bir hata kodu (varsa) ve genel bir yonlendirme.
+    console.error(
+      `Veritabanina baglanilamadi${err.code ? ` (${err.code})` : ''}. ` +
+        `${db.dialect === 'postgres' ? 'DATABASE_URL' : 'DB_PATH'} degiskenini kontrol edin.`
+    );
+    throw new Error('veritabani baglantisi dogrulanamadi');
+  }
   await db.init();
-  console.log(`Veritabani hazir (${db.usingRemote ? 'uzak: Turso' : 'yerel dosya'}).`);
+  console.log(`Veritabani hazir (${db.dialect === 'postgres' ? 'PostgreSQL' : 'yerel SQLite'}).`);
   server.listen(PORT, () => console.log(`Sinyalleşme sunucusu ${PORT} portunda çalışıyor`));
 }
 
