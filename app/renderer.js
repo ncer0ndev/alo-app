@@ -99,6 +99,7 @@ const chatLogEl = document.getElementById('chat-log');
 const chatScrollBtn = document.getElementById('chat-scroll-btn');
 const chatInput = document.getElementById('chat-input');
 const chatSendBtn = document.getElementById('chat-send-btn');
+const chatEmojiBtn = document.getElementById('chat-emoji-btn');
 
 const appShell = document.querySelector('.app-shell');
 const communityRail = document.getElementById('community-rail');
@@ -148,6 +149,7 @@ const textChannelEmptyEl = document.getElementById('text-channel-empty');
 const textChannelScrollBtn = document.getElementById('text-channel-scroll-btn');
 const textChannelInput = document.getElementById('text-channel-input');
 const textChannelSendBtn = document.getElementById('text-channel-send-btn');
+const textChannelEmojiBtn = document.getElementById('text-channel-emoji-btn');
 const serverMembersList = document.getElementById('server-members-list');
 const serverMembersPanel = document.getElementById('server-members-panel');
 const serverMembersCountEl = document.getElementById('server-members-count');
@@ -159,6 +161,8 @@ const memberHoverDot = document.getElementById('member-hover-dot');
 const memberHoverRole = document.getElementById('member-hover-role');
 const memberHoverStatus = document.getElementById('member-hover-status');
 const memberHoverGame = document.getElementById('member-hover-game');
+const emojiPicker = document.getElementById('emoji-picker');
+const emojiPickerGrid = document.getElementById('emoji-picker-grid');
 const serverDetailLoadState = document.getElementById('server-detail-load-state');
 const serverDetailLoadMessage = document.getElementById('server-detail-load-message');
 const serverDetailRetryBtn = document.getElementById('server-detail-retry-btn');
@@ -167,6 +171,20 @@ const deleteServerBtn = document.getElementById('delete-server-btn');
 const serverDetailStatusEl = document.getElementById('server-detail-status');
 const serverManagementSection = document.getElementById('server-management-section');
 const serverModerationSection = document.getElementById('server-moderation-section');
+const serverRolesSection = document.getElementById('server-roles-section');
+const roleNameInput = document.getElementById('role-name-input');
+const roleColorInput = document.getElementById('role-color-input');
+const rolePermKick = document.getElementById('role-perm-kick');
+const rolePermBan = document.getElementById('role-perm-ban');
+const rolePermChannels = document.getElementById('role-perm-channels');
+const rolePermRoles = document.getElementById('role-perm-roles');
+const rolePermMessages = document.getElementById('role-perm-messages');
+const createRoleBtn = document.getElementById('create-role-btn');
+const roleStatusEl = document.getElementById('role-status');
+const serverRolesListEl = document.getElementById('server-roles-list');
+const memberHoverRoleBadges = document.getElementById('member-hover-role-badges');
+const memberHoverRoleGrantBtn = document.getElementById('member-hover-role-grant-btn');
+const memberHoverRolePicker = document.getElementById('member-hover-role-picker');
 const serverRenameInput = document.getElementById('server-rename-input');
 const serverIconSelect = document.getElementById('server-icon-select');
 const saveServerSettingsBtn = document.getElementById('save-server-settings-btn');
@@ -202,6 +220,7 @@ const dmLogEl = document.getElementById('dm-log');
 const dmScrollBtn = document.getElementById('dm-scroll-btn');
 const dmInput = document.getElementById('dm-input');
 const dmSendBtn = document.getElementById('dm-send-btn');
+const dmEmojiBtn = document.getElementById('dm-emoji-btn');
 
 const micSelect = document.getElementById('mic-select');
 const speakerSelect = document.getElementById('speaker-select');
@@ -246,6 +265,7 @@ let currentRoomIsOwner = false;
 let currentChannelServerId = null;
 let currentChannelDisplayName = null;
 let currentServerChannelRole = null;
+let currentServerChannelPermissions = null;
 let activeServerDetail = null; // { id, name, role, inviteCode, members, channels }
 let channelEditMode = false; // kalem simgesiyle acilip kapanir; kanal SİL/AD/sirala butonlari yalnizca bu modda gorunur
 let currentTextChannel = null; // { serverId, channelId, name }
@@ -1476,7 +1496,7 @@ function renderParticipants() {
 
 function canKickInCurrentRoom() {
   if (currentRoomType === 'call') return false;
-  if (currentRoomType === 'server-channel') return currentServerChannelRole === 'owner' || currentServerChannelRole === 'moderator';
+  if (currentRoomType === 'server-channel') return !!currentServerChannelPermissions?.canKick;
   return currentRoomIsOwner;
 }
 
@@ -2194,6 +2214,11 @@ async function openServerDetail(serverId) {
       throw new Error(data.error || 'topluluk açılamadı');
     }
     activeServerDetail = data;
+    if (currentChannelServerId === serverId) {
+      currentServerChannelRole = data.role;
+      currentServerChannelPermissions = data.permissions || null;
+      renderParticipants();
+    }
     renderServerDetail();
     serverDetailLoadState.classList.add('hidden');
     serverDetailView.classList.remove('hidden');
@@ -2273,7 +2298,55 @@ function formatGameDuration(sinceMs) {
   return rest > 0 ? `${hours} sa ${rest} dk'dır` : `${hours} saattir`;
 }
 
-function showHoverCard(anchorEl, info) {
+function renderHoverRoleBadges(roles) {
+  memberHoverRoleBadges.innerHTML = '';
+  for (const role of roles || []) {
+    const chip = document.createElement('span');
+    chip.className = 'role-badge';
+    chip.style.borderColor = role.color;
+    chip.style.color = role.color;
+    chip.textContent = role.name;
+    memberHoverRoleBadges.appendChild(chip);
+  }
+}
+
+function toggleRoleGrantPicker(serverId, username, currentRoles, availableRoles) {
+  if (!memberHoverRolePicker.classList.contains('hidden')) {
+    memberHoverRolePicker.classList.add('hidden');
+    return;
+  }
+  memberHoverRolePicker.innerHTML = '';
+  if (!availableRoles.length) {
+    const empty = document.createElement('p');
+    empty.className = 'status-line';
+    empty.textContent = 'Henüz oluşturulmuş rol yok.';
+    memberHoverRolePicker.appendChild(empty);
+  }
+  const currentIds = new Set((currentRoles || []).map((r) => r.id));
+  for (const role of availableRoles) {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'btn btn-ghost role-picker-item';
+    const has = currentIds.has(role.id);
+    btn.textContent = `${has ? '✓ ' : ''}${role.name}`;
+    btn.style.borderColor = role.color;
+    btn.onclick = async (event) => {
+      event.stopPropagation();
+      try {
+        if (has) await apiDelete(`/api/servers/${serverId}/members/${encodeURIComponent(username)}/roles/${role.id}`);
+        else await apiRequest(`/api/servers/${serverId}/members/${encodeURIComponent(username)}/roles/${role.id}`, {});
+        hideMemberHoverCard();
+        await openServerDetail(serverId);
+      } catch (error) {
+        showToast(error.message, 'error');
+      }
+    };
+    memberHoverRolePicker.appendChild(btn);
+  }
+  memberHoverRolePicker.classList.remove('hidden');
+}
+
+function showHoverCard(anchorEl, info, context = {}) {
   memberHoverBanner.style.background = profileBanners.element(info.username).style.background;
   memberHoverAvatarWrap.replaceChildren(profileAvatars.image(info.username));
   memberHoverName.textContent = info.username;
@@ -2286,6 +2359,17 @@ function showHoverCard(anchorEl, info) {
     memberHoverGame.classList.remove('hidden');
   } else {
     memberHoverGame.classList.add('hidden');
+  }
+
+  renderHoverRoleBadges(info.roles);
+  memberHoverRolePicker.classList.add('hidden');
+  const canGrant = !!context.canManageRoles && !!context.serverId && info.role !== 'owner';
+  memberHoverRoleGrantBtn.classList.toggle('hidden', !canGrant);
+  if (canGrant) {
+    memberHoverRoleGrantBtn.onclick = (event) => {
+      event.stopPropagation();
+      toggleRoleGrantPicker(context.serverId, info.username, info.roles, context.availableRoles || []);
+    };
   }
 
   const anchorRect = anchorEl.getBoundingClientRect();
@@ -2302,7 +2386,11 @@ function showMemberHoverCard(row, username) {
   if (!activeServerDetail) return;
   const m = activeServerDetail.members.find((item) => item.username.toLowerCase() === username.toLowerCase());
   if (!m) return;
-  showHoverCard(row, m);
+  showHoverCard(row, m, {
+    serverId: activeServerDetail.id,
+    canManageRoles: !!activeServerDetail.permissions?.canManageRoles,
+    availableRoles: activeServerDetail.roles || [],
+  });
 }
 
 function showDmPeerHoverCard(anchorEl, username) {
@@ -2320,6 +2408,71 @@ function hideMemberHoverCard() {
   memberHoverCard.classList.add('hidden');
 }
 
+function renderServerRolesList() {
+  if (!activeServerDetail) return;
+  serverRolesListEl.innerHTML = '';
+  for (const role of activeServerDetail.roles || []) {
+    const li = document.createElement('li');
+    li.className = 'management-list-row';
+    const swatch = document.createElement('span');
+    swatch.className = 'role-color-swatch';
+    swatch.style.background = role.color;
+    const name = document.createElement('span');
+    name.className = 'name';
+    name.textContent = role.name;
+    const perms = document.createElement('span');
+    perms.className = 'preview';
+    const permLabels = [];
+    if (role.canKick) permLabels.push('atma');
+    if (role.canBan) permLabels.push('yasaklama');
+    if (role.canManageChannels) permLabels.push('kanal');
+    if (role.canManageRoles) permLabels.push('rol verme');
+    if (role.canManageMessages) permLabels.push('mesaj silme');
+    perms.textContent = permLabels.length ? permLabels.join(', ') : 'yetkisiz (yalnizca etiket)';
+    const delBtn = document.createElement('button');
+    delBtn.className = 'btn btn-ghost';
+    delBtn.textContent = '[ SİL ]';
+    delBtn.onclick = () => deleteServerRole(role.id);
+    li.append(swatch, name, perms, delBtn);
+    serverRolesListEl.appendChild(li);
+  }
+}
+
+async function createServerRole() {
+  if (!activeServerDetail) return;
+  const name = roleNameInput.value.trim();
+  if (!name) {
+    roleStatusEl.textContent = 'rol adi girmelisin';
+    return;
+  }
+  const permissions = {
+    canKick: rolePermKick.checked,
+    canBan: rolePermBan.checked,
+    canManageChannels: rolePermChannels.checked,
+    canManageRoles: rolePermRoles.checked,
+    canManageMessages: rolePermMessages.checked,
+  };
+  try {
+    await apiRequest(`/api/servers/${activeServerDetail.id}/roles`, { name, color: roleColorInput.value, permissions });
+    roleNameInput.value = '';
+    [rolePermKick, rolePermBan, rolePermChannels, rolePermRoles, rolePermMessages].forEach((cb) => { cb.checked = false; });
+    roleStatusEl.textContent = 'rol olusturuldu.';
+    await openServerDetail(activeServerDetail.id);
+  } catch (error) {
+    roleStatusEl.textContent = error.message;
+  }
+}
+
+async function deleteServerRole(roleId) {
+  if (!activeServerDetail) return;
+  try {
+    await apiDelete(`/api/servers/${activeServerDetail.id}/roles/${roleId}`);
+    await openServerDetail(activeServerDetail.id);
+  } catch (error) {
+    roleStatusEl.textContent = error.message;
+  }
+}
+
 function renderServerDetail() {
   if (!activeServerDetail) return;
   const d = activeServerDetail;
@@ -2335,13 +2488,20 @@ function renderServerDetail() {
   serverInviteSection.classList.toggle('hidden', !isOwner);
   if (isOwner) serverInviteCodeEl.textContent = d.inviteCode;
 
-  createChannelSection.classList.toggle('hidden', !isOwner && !isMod);
+  const perms = d.permissions || {};
+  createChannelSection.classList.toggle('hidden', !perms.canManageChannels);
   leaveServerBtn.classList.toggle('hidden', isOwner);
   deleteServerBtn.classList.toggle('hidden', !isOwner);
   serverManagementSection.classList.toggle('hidden', !isOwner);
-  serverModerationSection.classList.toggle('hidden', !isOwner && !isMod);
+  const canViewModerationPanel = isOwner || isMod || !!perms.canBan;
+  serverModerationSection.classList.toggle('hidden', !canViewModerationPanel);
+  loadServerBansBtn.classList.toggle('hidden', !perms.canBan);
+  loadServerAuditBtn.classList.toggle('hidden', !isOwner && !isMod);
+  loadJoinRequestsBtn.classList.toggle('hidden', !isOwner && !isMod);
+  serverRolesSection.classList.toggle('hidden', !isOwner);
+  if (isOwner) renderServerRolesList();
   serverInviteEnvelopeBtn.classList.toggle('hidden', d.role !== 'member');
-  serverEditModeBtn.classList.toggle('hidden', !isOwner && !isMod);
+  serverEditModeBtn.classList.toggle('hidden', !perms.canManageChannels);
   serverEditModeBtn.classList.toggle('active', channelEditMode);
   if (isOwner) {
     const approvalValue = d.joinApprovalRequired ? 'approval' : 'direct';
@@ -2409,7 +2569,7 @@ function renderServerDetail() {
       }
     });
 
-    if ((isOwner || isMod) && channelEditMode) {
+    if (perms.canManageChannels && channelEditMode) {
       const delBtn = document.createElement('button');
       delBtn.className = 'btn btn-ghost';
       delBtn.textContent = '[ SİL ]';
@@ -2428,10 +2588,16 @@ function renderServerDetail() {
     const li = document.createElement('li');
     li.className = 'server-channel-row server-channel-row--voice';
     li.dataset.channelId = String(c.id);
-    const icon = document.createElement('span');
-    icon.className = 'server-channel-icon';
-    icon.textContent = '◖◗';
+    const icon = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    icon.setAttribute('class', 'server-channel-icon');
+    icon.setAttribute('viewBox', '0 0 24 24');
     icon.setAttribute('aria-hidden', 'true');
+    const iconPath = document.createElementNS(icon.namespaceURI, 'path');
+    iconPath.setAttribute(
+      'd',
+      'M3 18v-6a9 9 0 0 1 18 0v6M21 19a2 2 0 0 1-2 2h-1a2 2 0 0 1-2-2v-3a2 2 0 0 1 2-2h3zM3 19a2 2 0 0 0 2 2h1a2 2 0 0 0 2-2v-3a2 2 0 0 0-2-2H3z'
+    );
+    icon.appendChild(iconPath);
     const main = document.createElement('div');
     main.className = 'server-channel-copy';
     const name = document.createElement('span');
@@ -2450,7 +2616,7 @@ function renderServerDetail() {
     joinChBtn.onclick = inThisChannel ? () => leaveRoom() : () => joinServerVoiceChannel(d.id, c.id, c.name);
     li.append(joinChBtn);
 
-    if ((isOwner || isMod) && channelEditMode) {
+    if (perms.canManageChannels && channelEditMode) {
       const delBtn = document.createElement('button');
       delBtn.className = 'btn btn-ghost';
       delBtn.textContent = '[ SİL ]';
@@ -2514,14 +2680,18 @@ function renderServerDetail() {
       actions.append(roleBtn);
     }
 
-    const canRemove = m.role !== 'owner' && (isOwner || (isMod && m.role === 'member')) && m.username.toLowerCase() !== myUsername;
+    const canTargetMember = m.role !== 'owner' && m.username.toLowerCase() !== myUsername;
+    const canRemove = canTargetMember && (isOwner || (perms.canKick && m.role === 'member'));
     if (canRemove) {
       const removeBtn = document.createElement('button');
       removeBtn.className = 'btn btn-ghost';
       removeBtn.textContent = '[ ÇIKAR ]';
       removeBtn.onclick = () => removeServerMember(d.id, m.username);
       actions.append(removeBtn);
+    }
 
+    const canBan = canTargetMember && (isOwner || (perms.canBan && m.role === 'member'));
+    if (canBan) {
       const banBtn = document.createElement('button');
       banBtn.className = 'btn btn-ghost';
       banBtn.textContent = '[ YASAKLA ]';
@@ -3042,6 +3212,7 @@ async function performJoinServerVoiceChannel(serverId, channelId, channelName) {
       ? activeServerDetail.members.find((m) => m.username.toLowerCase() === myUsername)
       : null;
   currentServerChannelRole = myMembership ? myMembership.role : null;
+  currentServerChannelPermissions = activeServerDetail?.id === serverId ? activeServerDetail.permissions || null : null;
   currentRoomIsOwner = false;
 
   updateDirectCallUI('server-channel', channelName);
@@ -3217,7 +3388,7 @@ async function openServerAndTextChannel(serverId, channelId) {
 const MESSAGE_DELETE_FOR_EVERYONE_WINDOW_MS = 5 * 60 * 1000;
 
 function canDeleteTextMessageForEveryone(m) {
-  const canModerate = activeServerDetail && (activeServerDetail.role === 'owner' || activeServerDetail.role === 'moderator');
+  const canModerate = !!activeServerDetail?.permissions?.canManageMessages;
   const withinWindow = Date.now() - m.ts <= MESSAGE_DELETE_FOR_EVERYONE_WINDOW_MS;
   return (m.own || canModerate) && withinWindow;
 }
@@ -3497,6 +3668,7 @@ function teardownCurrentRoomState() {
   currentChannelServerId = null;
   currentChannelDisplayName = null;
   currentServerChannelRole = null;
+  currentServerChannelPermissions = null;
   updateActiveCallBar();
 }
 
@@ -3823,6 +3995,10 @@ function connectSocket() {
   });
   socket.on('server-members-updated', ({ serverId }) => {
     if (activeServerDetail && activeServerDetail.id === Number(serverId)) openServerDetail(serverId);
+  });
+  socket.on('server-roles-updated', ({ serverId }) => {
+    const numericServerId = Number(serverId);
+    if (activeServerDetail && activeServerDetail.id === numericServerId) openServerDetail(numericServerId);
   });
   socket.on('server-owner-transferred', ({ serverId }) => {
     if (activeServerDetail && activeServerDetail.id === Number(serverId)) openServerDetail(serverId);
@@ -4335,6 +4511,94 @@ returnToCallBtn.addEventListener('click', () => {
   showScreen(roomScreen);
 });
 
+const EMOJI_LIST = [
+  '😀', '😃', '😄', '😁', '😆', '😅', '🤣', '😂', '🙂', '🙃',
+  '😉', '😊', '😇', '🥰', '😍', '🤩', '😘', '😗', '😚', '😙',
+  '😋', '😛', '😜', '🤪', '😝', '🤑', '🤗', '🤭', '🤫', '🤔',
+  '😐', '😑', '😶', '🙄', '😏', '😣', '😥', '😮', '🤐', '😯',
+  '😪', '😫', '🥱', '😴', '😌', '😔', '😪', '😷', '🤒', '🤕',
+  '🤢', '🤮', '🥵', '🥶', '😵', '🤯', '🤠', '🥳', '😎', '🤓',
+  '🧐', '😕', '😟', '🙁', '😮‍💨', '😯‍💨', '😲', '😳', '🥺', '😦',
+  '😧', '😨', '😰', '😥', '😢', '😭', '😱', '😖', '😣', '😞',
+  '😓', '😩', '😫', '🥱', '😤', '😡', '😠', '🤬', '😈', '👿',
+  '💀', '☠️', '💩', '🤡', '👻', '👽', '🤖', '😺', '😸', '😹',
+  '👍', '👎', '👏', '🙌', '🙏', '🤝', '💪', '👋', '✌️', '🤞',
+  '❤️', '🧡', '💛', '💚', '💙', '💜', '🖤', '🤍', '💔', '💯',
+  '🔥', '✨', '🎉', '🎊', '🎈', '🎁', '⭐', '🌟', '💫', '☕',
+  '🍕', '🍔', '🍟', '🌭', '🍿', '🍩', '🎮', '🎧', '🎵', '⚽',
+];
+
+let emojiPickerTarget = null;
+
+function buildEmojiPicker() {
+  if (emojiPickerGrid.childElementCount) return;
+  for (const emoji of EMOJI_LIST) {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'emoji-picker-item';
+    btn.textContent = emoji;
+    btn.onclick = () => insertEmoji(emoji);
+    emojiPickerGrid.appendChild(btn);
+  }
+}
+
+function insertEmoji(emoji) {
+  const input = emojiPickerTarget;
+  if (!input) return;
+  const start = input.selectionStart ?? input.value.length;
+  const end = input.selectionEnd ?? input.value.length;
+  input.value = input.value.slice(0, start) + emoji + input.value.slice(end);
+  const caret = start + emoji.length;
+  input.focus();
+  input.setSelectionRange(caret, caret);
+  input.dispatchEvent(new Event('input', { bubbles: true }));
+}
+
+function toggleEmojiPicker(triggerBtn, input) {
+  buildEmojiPicker();
+  if (!emojiPicker.classList.contains('hidden') && emojiPickerTarget === input) {
+    emojiPicker.classList.add('hidden');
+    emojiPickerTarget = null;
+    return;
+  }
+  emojiPickerTarget = input;
+  emojiPicker.classList.remove('hidden');
+  const btnRect = triggerBtn.getBoundingClientRect();
+  const pickerRect = emojiPicker.getBoundingClientRect();
+  let left = btnRect.left;
+  if (left + pickerRect.width > window.innerWidth - 8) left = window.innerWidth - pickerRect.width - 8;
+  let top = btnRect.top - pickerRect.height - 8;
+  if (top < 8) top = btnRect.bottom + 8;
+  emojiPicker.style.left = `${Math.max(8, left)}px`;
+  emojiPicker.style.top = `${top}px`;
+}
+
+function hideEmojiPicker() {
+  emojiPicker.classList.add('hidden');
+  emojiPickerTarget = null;
+}
+
+chatEmojiBtn.addEventListener('click', (event) => {
+  event.stopPropagation();
+  toggleEmojiPicker(chatEmojiBtn, chatInput);
+});
+dmEmojiBtn.addEventListener('click', (event) => {
+  event.stopPropagation();
+  toggleEmojiPicker(dmEmojiBtn, dmInput);
+});
+textChannelEmojiBtn.addEventListener('click', (event) => {
+  event.stopPropagation();
+  toggleEmojiPicker(textChannelEmojiBtn, textChannelInput);
+});
+document.addEventListener('click', (event) => {
+  if (!emojiPicker.classList.contains('hidden') && !emojiPicker.contains(event.target) && event.target !== emojiPickerTarget) {
+    hideEmojiPicker();
+  }
+});
+document.addEventListener('keydown', (event) => {
+  if (event.key === 'Escape' && !emojiPicker.classList.contains('hidden')) hideEmojiPicker();
+});
+
 chatSendBtn.addEventListener('click', sendChatMessage);
 
 chatInput.addEventListener('keydown', (e) => {
@@ -4410,6 +4674,7 @@ createChannelNameInput.addEventListener('keydown', (e) => {
 });
 saveServerSettingsBtn.addEventListener('click', saveServerSettings);
 transferServerBtn.addEventListener('click', transferServerOwnership);
+createRoleBtn.addEventListener('click', createServerRole);
 loadServerBansBtn.addEventListener('click', loadServerBans);
 loadServerAuditBtn.addEventListener('click', loadServerAuditLog);
 loadJoinRequestsBtn.addEventListener('click', loadJoinRequests);

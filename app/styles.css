@@ -1386,6 +1386,51 @@ textarea:focus-visible,
   align-items: flex-end;
 }
 
+.emoji-toggle-btn {
+  flex: 0 0 auto;
+  width: 36px;
+  min-height: 0;
+  padding: 0;
+  font-size: 16px;
+  line-height: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.emoji-picker {
+  position: fixed;
+  z-index: 50;
+  width: 260px;
+  max-height: 220px;
+  overflow-y: auto;
+  padding: 8px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: 0 8px 24px color-mix(in srgb, #000 30%, transparent);
+}
+
+.emoji-picker-grid {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 2px;
+}
+
+.emoji-picker-item {
+  border: 0;
+  background: transparent;
+  font-size: 18px;
+  line-height: 1;
+  padding: 5px;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.emoji-picker-item:hover {
+  background: color-mix(in srgb, var(--fg) 10%, transparent);
+}
+
 .chat-input {
   flex: 1;
   min-width: 0;
@@ -2404,7 +2449,16 @@ textarea:focus-visible,
 }
 
 .server-channel-row:hover { border-color: var(--accent); }
-.server-channel-icon { color: var(--accent); font: 700 13px/1 var(--font-data); }
+.server-channel-icon {
+  width: 16px;
+  height: 16px;
+  flex: 0 0 16px;
+  fill: none;
+  stroke: var(--accent);
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
 
 .server-channel-copy {
   flex: 1;

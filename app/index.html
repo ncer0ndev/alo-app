@@ -37,10 +37,17 @@
           <span id="member-hover-dot" class="server-member-presence"></span>
         </div>
         <div id="member-hover-role" class="member-hover-role"></div>
+        <div id="member-hover-role-badges" class="member-hover-role-badges"></div>
         <div id="member-hover-status" class="member-hover-status"></div>
         <div id="member-hover-game" class="member-hover-game hidden"></div>
+        <button id="member-hover-role-grant-btn" type="button" class="btn btn-ghost hidden">[ ROL VER ]</button>
+        <div id="member-hover-role-picker" class="member-hover-role-picker hidden"></div>
       </div>
     </div>
+  </div>
+
+  <div id="emoji-picker" class="emoji-picker hidden" role="dialog" aria-label="Emoji seç">
+    <div id="emoji-picker-grid" class="emoji-picker-grid"></div>
   </div>
 
   <div id="invite-friend-modal" class="modal-backdrop hidden">
@@ -216,6 +223,7 @@
             <div id="dm-log" class="chat-log" role="log" aria-live="polite"></div>
             <button id="dm-scroll-btn" class="btn btn-ghost chat-scroll-btn hidden">[ YENİ MESAJLAR ▾ ]</button>
             <div class="chat-input-row">
+              <button id="dm-emoji-btn" type="button" class="btn btn-ghost emoji-toggle-btn" aria-label="Emoji ekle">😊</button>
               <textarea id="dm-input" class="chat-input" placeholder="Mesaj yaz..." maxlength="2000" rows="1"></textarea>
               <button id="dm-send-btn" class="btn">[ GÖNDER ]</button>
             </div>
@@ -585,6 +593,24 @@
                     </div>
                     <ul id="server-management-list" class="management-list"></ul>
                   </details>
+                  <details id="server-roles-section" class="community-management hidden">
+                    <summary>ROLLER</summary>
+                    <p class="hint-text">Roller gerçek yetkiler taşır. Rol oluşturma yalnızca sana ait; "rol verebilir" yetkisi verdiğin kişiler ise ürettiğin rolleri üyelere atayabilir.</p>
+                    <div class="community-management-grid">
+                      <label class="compact-field"><span>ROL ADI</span><input id="role-name-input" type="text" maxlength="40" /></label>
+                      <label class="compact-field"><span>RENK</span><input id="role-color-input" type="color" value="#5865f2" /></label>
+                    </div>
+                    <div class="role-permission-checks">
+                      <label><input type="checkbox" id="role-perm-kick" /> Üye atabilir</label>
+                      <label><input type="checkbox" id="role-perm-ban" /> Üye yasaklayabilir</label>
+                      <label><input type="checkbox" id="role-perm-channels" /> Kanal oluşturup silebilir</label>
+                      <label><input type="checkbox" id="role-perm-roles" /> Üyelere rol verebilir</label>
+                      <label><input type="checkbox" id="role-perm-messages" /> Başkalarının mesajını silebilir</label>
+                    </div>
+                    <button id="create-role-btn" class="btn btn-ghost">[ ROL OLUŞTUR ]</button>
+                    <p id="role-status" class="status-line"></p>
+                    <ul id="server-roles-list" class="management-list"></ul>
+                  </details>
                   <p id="server-detail-status" class="status-line"></p>
                 </div>
               </div>
@@ -604,6 +630,7 @@
                 <button id="text-channel-scroll-btn" class="btn btn-ghost chat-scroll-btn hidden">[ YENİ MESAJLAR ▾ ]</button>
 
                 <div class="chat-input-row">
+                  <button id="text-channel-emoji-btn" type="button" class="btn btn-ghost emoji-toggle-btn" aria-label="Emoji ekle">😊</button>
                   <textarea
                     id="text-channel-input"
                     class="chat-input"
@@ -669,6 +696,7 @@
         <div id="chat-log" class="chat-log" role="log" aria-live="polite"></div>
         <button id="chat-scroll-btn" class="btn btn-ghost chat-scroll-btn hidden">[ YENİ MESAJLAR ▾ ]</button>
         <div class="chat-input-row">
+          <button id="chat-emoji-btn" type="button" class="btn btn-ghost emoji-toggle-btn" aria-label="Emoji ekle">😊</button>
           <textarea id="chat-input" class="chat-input" placeholder="Mesaj yaz..." maxlength="2000" rows="1"></textarea>
           <button id="chat-send-btn" class="btn">[ GÖNDER ]</button>
         </div>

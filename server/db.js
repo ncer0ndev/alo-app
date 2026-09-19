@@ -590,6 +590,114 @@ async function listServerMembers(serverId) {
   return res.rows;
 }
 
+function mapServerRoleRow(row) {
+  return {
+    id: Number(row.id),
+    serverId: Number(row.server_id),
+    name: row.name,
+    color: row.color,
+    canKick: !!Number(row.can_kick),
+    canBan: !!Number(row.can_ban),
+    canManageChannels: !!Number(row.can_manage_channels),
+    canManageRoles: !!Number(row.can_manage_roles),
+    canManageMessages: !!Number(row.can_manage_messages),
+  };
+}
+
+async function createServerRole(serverId, { name, color, permissions }) {
+  const res = await adapter.query({
+    sql: `INSERT INTO server_roles
+            (server_id, name, color, can_kick, can_ban, can_manage_channels, can_manage_roles, can_manage_messages, created_at)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+          RETURNING id`,
+    args: [
+      serverId,
+      name,
+      color,
+      permissions.canKick ? 1 : 0,
+      permissions.canBan ? 1 : 0,
+      permissions.canManageChannels ? 1 : 0,
+      permissions.canManageRoles ? 1 : 0,
+      permissions.canManageMessages ? 1 : 0,
+      Date.now(),
+    ],
+  });
+  return Number(res.rows[0].id);
+}
+
+async function listServerRoles(serverId) {
+  const res = await adapter.query({
+    sql: 'SELECT * FROM server_roles WHERE server_id = ? ORDER BY created_at ASC',
+    args: [serverId],
+  });
+  return res.rows.map(mapServerRoleRow);
+}
+
+async function getServerRole(roleId) {
+  const res = await adapter.query({ sql: 'SELECT * FROM server_roles WHERE id = ?', args: [roleId] });
+  return res.rows[0] ? mapServerRoleRow(res.rows[0]) : null;
+}
+
+async function updateServerRole(roleId, { name, color, permissions }) {
+  await adapter.query({
+    sql: `UPDATE server_roles SET name = ?, color = ?, can_kick = ?, can_ban = ?, can_manage_channels = ?,
+          can_manage_roles = ?, can_manage_messages = ? WHERE id = ?`,
+    args: [
+      name,
+      color,
+      permissions.canKick ? 1 : 0,
+      permissions.canBan ? 1 : 0,
+      permissions.canManageChannels ? 1 : 0,
+      permissions.canManageRoles ? 1 : 0,
+      permissions.canManageMessages ? 1 : 0,
+      roleId,
+    ],
+  });
+}
+
+async function deleteServerRole(roleId) {
+  await adapter.query({ sql: 'DELETE FROM server_roles WHERE id = ?', args: [roleId] });
+}
+
+async function assignRoleToMember(serverId, userId, roleId) {
+  await adapter.query({
+    sql: 'INSERT INTO server_member_roles (server_id, user_id, role_id) VALUES (?, ?, ?) ON CONFLICT (user_id, role_id) DO NOTHING',
+    args: [serverId, userId, roleId],
+  });
+}
+
+async function removeRoleFromMember(userId, roleId) {
+  await adapter.query({ sql: 'DELETE FROM server_member_roles WHERE user_id = ? AND role_id = ?', args: [userId, roleId] });
+}
+
+async function listMemberRoles(serverId, userId) {
+  const res = await adapter.query({
+    sql: `SELECT r.* FROM server_member_roles mr
+          JOIN server_roles r ON r.id = mr.role_id
+          WHERE mr.server_id = ? AND mr.user_id = ?
+          ORDER BY r.created_at ASC`,
+    args: [serverId, userId],
+  });
+  return res.rows.map(mapServerRoleRow);
+}
+
+async function listMemberRolesForServer(serverId) {
+  const res = await adapter.query({
+    sql: `SELECT mr.user_id, r.* FROM server_member_roles mr
+          JOIN server_roles r ON r.id = mr.role_id
+          WHERE mr.server_id = ?
+          ORDER BY r.created_at ASC`,
+    args: [serverId],
+  });
+  const byUser = new Map();
+  for (const row of res.rows) {
+    const userId = Number(row.user_id);
+    if (!byUser.has(userId)) byUser.set(userId, []);
+    byUser.get(userId).push(mapServerRoleRow(row));
+  }
+  return byUser;
+}
+
 async function regenerateInviteCode(serverId) {
   for (let attempt = 0; attempt < 5; attempt++) {
     const inviteCode = generateInviteCode();
@@ -614,11 +722,17 @@ async function deleteServer(serverId) {
       sql: 'DELETE FROM server_channel_read_state WHERE channel_id IN (SELECT id FROM server_channels WHERE server_id = ?)',
       args: [serverId],
     },
+    {
+      sql: 'DELETE FROM server_message_hides WHERE message_id IN (SELECT id FROM server_messages WHERE server_id = ?)',
+      args: [serverId],
+    },
     { sql: 'DELETE FROM server_messages WHERE server_id = ?', args: [serverId] },
     { sql: 'DELETE FROM server_audit_log WHERE server_id = ?', args: [serverId] },
     { sql: 'DELETE FROM server_bans WHERE server_id = ?', args: [serverId] },
     { sql: 'UPDATE user_reports SET server_id = NULL WHERE server_id = ?', args: [serverId] },
     { sql: 'DELETE FROM server_channels WHERE server_id = ?', args: [serverId] },
+    { sql: 'DELETE FROM server_member_roles WHERE server_id = ?', args: [serverId] },
+    { sql: 'DELETE FROM server_roles WHERE server_id = ?', args: [serverId] },
     { sql: 'DELETE FROM server_members WHERE server_id = ?', args: [serverId] },
     { sql: 'DELETE FROM servers WHERE id = ?', args: [serverId] },
   ]);
@@ -899,8 +1013,10 @@ async function deleteUserAccount(userId) {
   }
 
   await adapter.batch([
+    { sql: 'DELETE FROM server_member_roles WHERE user_id = ?', args: [userId] },
     { sql: 'DELETE FROM server_members WHERE user_id = ?', args: [userId] },
     { sql: 'DELETE FROM server_channel_read_state WHERE user_id = ?', args: [userId] },
+    { sql: 'DELETE FROM server_message_hides WHERE user_id = ?', args: [userId] },
     { sql: 'DELETE FROM server_messages WHERE from_user_id = ?', args: [userId] },
     { sql: 'DELETE FROM server_bans WHERE user_id = ? OR banned_by_user_id = ?', args: [userId, userId] },
     { sql: 'DELETE FROM user_reports WHERE reporter_user_id = ? OR reported_user_id = ?', args: [userId, userId] },
@@ -908,6 +1024,7 @@ async function deleteUserAccount(userId) {
     { sql: 'DELETE FROM friendships WHERE user_a_id = ? OR user_b_id = ?', args: [userId, userId] },
     { sql: 'DELETE FROM friend_requests WHERE from_user_id = ? OR to_user_id = ?', args: [userId, userId] },
     { sql: 'DELETE FROM direct_messages WHERE from_user_id = ? OR to_user_id = ?', args: [userId, userId] },
+    { sql: 'DELETE FROM dm_message_hides WHERE user_id = ?', args: [userId] },
     { sql: 'DELETE FROM dm_read_state WHERE user_id = ? OR other_user_id = ?', args: [userId, userId] },
     { sql: 'DELETE FROM user_blocks WHERE blocker_user_id = ? OR blocked_user_id = ?', args: [userId, userId] },
     { sql: 'DELETE FROM users WHERE id = ?', args: [userId] },
@@ -1036,6 +1153,15 @@ module.exports = {
   unpinDm,
   listDmPins,
   listServerMembers,
+  createServerRole,
+  listServerRoles,
+  getServerRole,
+  updateServerRole,
+  deleteServerRole,
+  assignRoleToMember,
+  removeRoleFromMember,
+  listMemberRoles,
+  listMemberRolesForServer,
   regenerateInviteCode,
   deleteServer,
   createChannel,

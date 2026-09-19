@@ -1080,7 +1080,20 @@ app.delete(
 // Not: metin kanallari bu surumde yok, yalnizca sesli kanallar. Yetkilendirme
 // her zaman sunucuda server_members tablosundan okunur, istemciye guvenilmez.
 
-function publicServerMember(row) {
+function publicServerRole(role) {
+  return {
+    id: role.id,
+    name: role.name,
+    color: role.color,
+    canKick: role.canKick,
+    canBan: role.canBan,
+    canManageChannels: role.canManageChannels,
+    canManageRoles: role.canManageRoles,
+    canManageMessages: role.canManageMessages,
+  };
+}
+
+function publicServerMember(row, rolesByUser) {
   return {
     username: row.username,
     avatarId: publicAvatar(row),
@@ -1089,7 +1102,33 @@ function publicServerMember(row) {
     ...gameStatusFields(row.username.toLowerCase()),
     role: row.role,
     online: isUserOnline(row.username),
+    roles: (rolesByUser?.get(Number(row.id)) || []).map(publicServerRole),
   };
+}
+
+// Ozel rollerin etkin yetkilerini hesaplar (bkz. migrations/0004_custom_roles.js).
+// Sahip her zaman tam yetkili; moderator temel yetkilerini (rol verme HARIC)
+// korur; ozel roller bunlarin USTUNE ek yetki taniyabilir (OR ile birlesir).
+async function getMemberPermissions(serverId, userId, baseRole) {
+  if (baseRole === 'owner') {
+    return { canKick: true, canBan: true, canManageChannels: true, canManageRoles: true, canManageMessages: true };
+  }
+  const perms = {
+    canKick: baseRole === 'moderator',
+    canBan: baseRole === 'moderator',
+    canManageChannels: baseRole === 'moderator',
+    canManageRoles: false,
+    canManageMessages: baseRole === 'moderator',
+  };
+  const roles = await db.listMemberRoles(serverId, userId);
+  for (const role of roles) {
+    if (role.canKick) perms.canKick = true;
+    if (role.canBan) perms.canBan = true;
+    if (role.canManageChannels) perms.canManageChannels = true;
+    if (role.canManageRoles) perms.canManageRoles = true;
+    if (role.canManageMessages) perms.canManageMessages = true;
+  }
+  return perms;
 }
 
 async function requireServerMembership(req, res, serverId) {
@@ -1194,19 +1233,24 @@ app.get(
     const serverId = Number(req.params.id);
     const ctx = await requireServerMembership(req, res, serverId);
     if (!ctx) return;
-    const [members, channels, unreadByChannel] = await Promise.all([
+    const [members, channels, unreadByChannel, roles, rolesByUser, permissions] = await Promise.all([
       db.listServerMembers(serverId),
       db.listChannels(serverId),
       db.getUnreadCountsByChannel(serverId, req.userId),
+      db.listServerRoles(serverId),
+      db.listMemberRolesForServer(serverId),
+      getMemberPermissions(serverId, req.userId, ctx.member.role),
     ]);
     res.json({
       id: ctx.server.id,
       name: ctx.server.name,
       iconId: ctx.server.icon_id,
       role: ctx.member.role,
+      permissions,
+      roles: roles.map(publicServerRole),
       inviteCode: ctx.member.role === 'owner' ? ctx.server.invite_code : undefined,
       joinApprovalRequired: !!ctx.server.join_approval_required,
-      members: members.map(publicServerMember),
+      members: members.map((m) => publicServerMember(m, rolesByUser)),
       channels: channels.map((c) =>
         c.type === 'text'
           ? { id: c.id, name: c.name, type: 'text', position: Number(c.position), unreadCount: unreadByChannel.get(c.id) || 0 }
@@ -1231,8 +1275,9 @@ app.post(
     const serverId = Number(req.params.id);
     const ctx = await requireServerMembership(req, res, serverId);
     if (!ctx) return;
-    if (ctx.member.role !== 'owner' && ctx.member.role !== 'moderator') {
-      return res.status(403).json({ error: 'yalnizca topluluk sahibi veya moderator kanal olusturabilir' });
+    const chanPerms = await getMemberPermissions(serverId, req.userId, ctx.member.role);
+    if (!chanPerms.canManageChannels) {
+      return res.status(403).json({ error: 'kanal olusturma yetkin yok' });
     }
     const { name, type } = req.body || {};
     if (!isValidServerOrChannelName(name)) return res.status(400).json({ error: 'gecersiz kanal adi (2-40 karakter)' });
@@ -1258,8 +1303,9 @@ app.delete(
     const channelId = Number(req.params.channelId);
     const ctx = await requireServerMembership(req, res, serverId);
     if (!ctx) return;
-    if (ctx.member.role !== 'owner' && ctx.member.role !== 'moderator') {
-      return res.status(403).json({ error: 'yalnizca sahip veya moderator kanal silebilir' });
+    const chanPerms = await getMemberPermissions(serverId, req.userId, ctx.member.role);
+    if (!chanPerms.canManageChannels) {
+      return res.status(403).json({ error: 'kanal silme yetkin yok' });
     }
     const channel = await db.getChannelById(channelId);
     if (!channel || channel.server_id !== serverId) return res.status(404).json({ error: 'kanal bulunamadi' });
@@ -1586,9 +1632,9 @@ app.post(
     if (!targetMember) return res.status(404).json({ error: 'kullanici bu toplulugun uyesi degil' });
 
     const requesterIsOwner = ctx.member.role === 'owner';
-    const requesterIsMod = ctx.member.role === 'moderator';
     if (targetMember.role === 'owner') return res.status(403).json({ error: 'sahip cikarilamaz' });
-    if (!requesterIsOwner && !(requesterIsMod && targetMember.role === 'member')) {
+    const kickPerms = await getMemberPermissions(serverId, req.userId, ctx.member.role);
+    if (!requesterIsOwner && !(kickPerms.canKick && targetMember.role === 'member')) {
       return res.status(403).json({ error: 'bu kullaniciyi cikarma yetkin yok' });
     }
 
@@ -1607,7 +1653,8 @@ app.get(
     const serverId = Number(req.params.id);
     const ctx = await requireServerMembership(req, res, serverId);
     if (!ctx) return;
-    if (ctx.member.role !== 'owner' && ctx.member.role !== 'moderator') return res.status(403).json({ error: 'yetkin yok' });
+    const banViewPerms = await getMemberPermissions(serverId, req.userId, ctx.member.role);
+    if (!banViewPerms.canBan) return res.status(403).json({ error: 'yetkin yok' });
     const bans = await db.listServerBans(serverId);
     res.json({ bans: bans.map((row) => ({ username: row.username, avatarId: publicAvatar(row), reason: row.reason, bannedBy: row.banned_by, createdAt: Number(row.created_at) })) });
   })
@@ -1626,7 +1673,8 @@ app.post(
     const targetMember = await db.getServerMember(serverId, target.id);
     if (!targetMember) return res.status(404).json({ error: 'kullanici bu toplulugun uyesi degil' });
     if (targetMember.role === 'owner' || target.id === req.userId) return res.status(403).json({ error: 'bu kullanici yasaklanamaz' });
-    const allowed = ctx.member.role === 'owner' || (ctx.member.role === 'moderator' && targetMember.role === 'member');
+    const banPerms = await getMemberPermissions(serverId, req.userId, ctx.member.role);
+    const allowed = ctx.member.role === 'owner' || (banPerms.canBan && targetMember.role === 'member');
     if (!allowed) return res.status(403).json({ error: 'bu kullaniciyi yasaklama yetkin yok' });
     const reason = typeof req.body?.reason === 'string' ? req.body.reason.trim().slice(0, 300) : '';
     await db.banServerMember(serverId, target.id, req.userId, reason);
@@ -1645,10 +1693,158 @@ app.delete(
     const serverId = Number(req.params.id);
     const ctx = await requireServerMembership(req, res, serverId);
     if (!ctx) return;
-    if (ctx.member.role !== 'owner' && ctx.member.role !== 'moderator') return res.status(403).json({ error: 'yetkin yok' });
+    const unbanPerms = await getMemberPermissions(serverId, req.userId, ctx.member.role);
+    if (!unbanPerms.canBan) return res.status(403).json({ error: 'yetkin yok' });
     const target = await db.getUserByUsername(req.params.username);
     if (target) await db.unbanServerMember(serverId, target.id);
     await db.addServerAuditLog(serverId, req.userId, 'member_unbanned', req.params.username);
+    res.json({ ok: true });
+  })
+);
+
+// ---- Ozel roller ----
+// Rol OLUSTURMA/DUZENLEME/SILME yalnizca topluluk sahibine ait (yetki
+// setlerini tanimlamak, atamaktan daha hassas). Rol ATAMA/KALDIRMA ise
+// canManageRoles yetkisine sahip herkese acik - sahip bunu istedigi bir
+// kullaniciya (moderator olsun olmasin) ozel bir rol araciligiyla verebilir.
+// Sahibin kendi (owner) rolu, sahibin kendisi disinda kimse tarafindan
+// degistirilemez.
+function cleanRolePermissions(input) {
+  return {
+    canKick: !!input?.canKick,
+    canBan: !!input?.canBan,
+    canManageChannels: !!input?.canManageChannels,
+    canManageRoles: !!input?.canManageRoles,
+    canManageMessages: !!input?.canManageMessages,
+  };
+}
+
+app.post(
+  '/api/servers/:id/roles',
+  requireAuth,
+  friendLimiter,
+  asyncRoute(async (req, res) => {
+    const serverId = Number(req.params.id);
+    const ctx = await requireServerMembership(req, res, serverId);
+    if (!ctx) return;
+    if (ctx.member.role !== 'owner') return res.status(403).json({ error: 'yalnizca topluluk sahibi rol olusturabilir' });
+    const { name, color, permissions } = req.body || {};
+    if (!isValidServerOrChannelName(name)) return res.status(400).json({ error: 'gecersiz rol adi (2-40 karakter)' });
+    const cleanColor = typeof color === 'string' && /^#[0-9a-fA-F]{6}$/.test(color) ? color : '#5865f2';
+    const roleId = await db.createServerRole(serverId, { name: name.trim(), color: cleanColor, permissions: cleanRolePermissions(permissions) });
+    const role = await db.getServerRole(roleId);
+    await db.addServerAuditLog(serverId, req.userId, 'role_created', role.name);
+    await emitToServerMembers(serverId, 'server-roles-updated', { serverId });
+    res.json(publicServerRole(role));
+  })
+);
+
+app.get(
+  '/api/servers/:id/roles',
+  requireAuth,
+  asyncRoute(async (req, res) => {
+    const serverId = Number(req.params.id);
+    const ctx = await requireServerMembership(req, res, serverId);
+    if (!ctx) return;
+    const roles = await db.listServerRoles(serverId);
+    res.json({ roles: roles.map(publicServerRole) });
+  })
+);
+
+app.patch(
+  '/api/servers/:id/roles/:roleId',
+  requireAuth,
+  friendLimiter,
+  asyncRoute(async (req, res) => {
+    const serverId = Number(req.params.id);
+    const roleId = Number(req.params.roleId);
+    const ctx = await requireServerMembership(req, res, serverId);
+    if (!ctx) return;
+    if (ctx.member.role !== 'owner') return res.status(403).json({ error: 'yalnizca topluluk sahibi rol duzenleyebilir' });
+    const role = await db.getServerRole(roleId);
+    if (!role || role.serverId !== serverId) return res.status(404).json({ error: 'rol bulunamadi' });
+    const { name, color, permissions } = req.body || {};
+    if (!isValidServerOrChannelName(name)) return res.status(400).json({ error: 'gecersiz rol adi (2-40 karakter)' });
+    const cleanColor = typeof color === 'string' && /^#[0-9a-fA-F]{6}$/.test(color) ? color : role.color;
+    await db.updateServerRole(roleId, { name: name.trim(), color: cleanColor, permissions: cleanRolePermissions(permissions) });
+    await emitToServerMembers(serverId, 'server-roles-updated', { serverId });
+    res.json({ ok: true });
+  })
+);
+
+app.delete(
+  '/api/servers/:id/roles/:roleId',
+  requireAuth,
+  asyncRoute(async (req, res) => {
+    const serverId = Number(req.params.id);
+    const roleId = Number(req.params.roleId);
+    const ctx = await requireServerMembership(req, res, serverId);
+    if (!ctx) return;
+    if (ctx.member.role !== 'owner') return res.status(403).json({ error: 'yalnizca topluluk sahibi rol silebilir' });
+    const role = await db.getServerRole(roleId);
+    if (!role || role.serverId !== serverId) return res.status(404).json({ error: 'rol bulunamadi' });
+    await db.deleteServerRole(roleId);
+    await db.addServerAuditLog(serverId, req.userId, 'role_deleted', role.name);
+    await emitToServerMembers(serverId, 'server-roles-updated', { serverId });
+    res.json({ ok: true });
+  })
+);
+
+async function requireRoleAssignAccess(req, res, serverId, roleId) {
+  const ctx = await requireServerMembership(req, res, serverId);
+  if (!ctx) return null;
+  const target = await db.getUserByUsername(req.params.username);
+  if (!target) {
+    res.status(404).json({ error: 'kullanici bulunamadi' });
+    return null;
+  }
+  const targetMember = await db.getServerMember(serverId, target.id);
+  if (!targetMember) {
+    res.status(404).json({ error: 'kullanici bu toplulugun uyesi degil' });
+    return null;
+  }
+  if (targetMember.role === 'owner' && target.id !== req.userId) {
+    res.status(403).json({ error: 'sahibin rolunu yalnizca sahibin kendisi belirleyebilir' });
+    return null;
+  }
+  const perms = await getMemberPermissions(serverId, req.userId, ctx.member.role);
+  if (!perms.canManageRoles) {
+    res.status(403).json({ error: 'rol verme yetkin yok' });
+    return null;
+  }
+  const role = await db.getServerRole(roleId);
+  if (!role || role.serverId !== serverId) {
+    res.status(404).json({ error: 'rol bulunamadi' });
+    return null;
+  }
+  return { target, role };
+}
+
+app.post(
+  '/api/servers/:id/members/:username/roles/:roleId',
+  requireAuth,
+  friendLimiter,
+  asyncRoute(async (req, res) => {
+    const serverId = Number(req.params.id);
+    const roleId = Number(req.params.roleId);
+    const ctx = await requireRoleAssignAccess(req, res, serverId, roleId);
+    if (!ctx) return;
+    await db.assignRoleToMember(serverId, ctx.target.id, roleId);
+    await emitToServerMembers(serverId, 'server-roles-updated', { serverId });
+    res.json({ ok: true });
+  })
+);
+
+app.delete(
+  '/api/servers/:id/members/:username/roles/:roleId',
+  requireAuth,
+  asyncRoute(async (req, res) => {
+    const serverId = Number(req.params.id);
+    const roleId = Number(req.params.roleId);
+    const ctx = await requireRoleAssignAccess(req, res, serverId, roleId);
+    if (!ctx) return;
+    await db.removeRoleFromMember(ctx.target.id, roleId);
+    await emitToServerMembers(serverId, 'server-roles-updated', { serverId });
     res.json({ ok: true });
   })
 );
@@ -1958,9 +2154,9 @@ io.on('connection', (socket) => {
       if (!member) return ack({ error: 'bu toplulugun uyesi degilsin' });
 
       const isOwnMessage = Number(message.from_user_id) === userId;
-      const canModerate = member.role === 'owner' || member.role === 'moderator';
+      const msgPerms = await getMemberPermissions(message.server_id, userId, member.role);
       const withinWindow = Date.now() - Number(message.created_at) <= MESSAGE_DELETE_FOR_EVERYONE_WINDOW_MS;
-      const canDeleteEveryone = (isOwnMessage || canModerate) && withinWindow;
+      const canDeleteEveryone = (isOwnMessage || msgPerms.canManageMessages) && withinWindow;
 
       if (mode === 'everyone') {
         if (!canDeleteEveryone) return ack({ error: 'bu mesaj artik herkesten silinemez' });
@@ -2089,8 +2285,10 @@ io.on('connection', (socket) => {
     if (room.type === 'server-channel') {
       if (!room.members.has(targetSocketId)) return ack({ error: 'kullanici bu odada degil' });
       db.getServerMember(room.serverId, userId)
-        .then((member) => {
-          if (!member || (member.role !== 'owner' && member.role !== 'moderator')) {
+        .then(async (member) => {
+          if (!member) return ack({ error: 'yetkin yok' });
+          const permissions = await getMemberPermissions(room.serverId, userId, member.role);
+          if (!permissions.canKick) {
             return ack({ error: 'yetkin yok' });
           }
           forceKickFromRoom(socket.data.currentRoom, targetSocketId);
