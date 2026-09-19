@@ -41,6 +41,12 @@ const statusMessageStatusEl = document.getElementById('status-message-status');
 
 const notepadTextarea = document.getElementById('notepad-textarea');
 const notepadStatusEl = document.getElementById('notepad-status');
+const avatarUploadInput = document.getElementById('avatar-upload-input');
+const avatarUploadStatusEl = document.getElementById('avatar-upload-status');
+const bannerUploadInput = document.getElementById('banner-upload-input');
+const bannerUploadStatusEl = document.getElementById('banner-upload-status');
+const MAX_AVATAR_UPLOAD_BYTES = 5 * 1024 * 1024;
+const MAX_BANNER_UPLOAD_BYTES = 8 * 1024 * 1024;
 const visibilityRadios = document.querySelectorAll('input[name="visibility-select"]');
 const railPresenceBtn = document.getElementById('rail-presence-btn');
 const railPresenceLabel = document.getElementById('rail-presence-label');
@@ -847,6 +853,22 @@ async function apiRequest(endpoint, body) {
       Authorization: `Bearer ${token}`,
     },
     body: JSON.stringify(body || {}),
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error || 'bir hata oluştu');
+  return data;
+}
+
+// FormData ile dosya yuklemede 'Content-Type' elle ayarlanmaz - tarayici
+// dogru multipart sinirini (boundary) kendisi ekler.
+async function apiUpload(endpoint, fieldName, file) {
+  const { token } = getSession();
+  const form = new FormData();
+  form.append(fieldName, file);
+  const res = await fetch(`${getServerUrl()}${endpoint}`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${token}` },
+    body: form,
   });
   const data = await res.json();
   if (!res.ok) throw new Error(data.error || 'bir hata oluştu');
@@ -2213,7 +2235,7 @@ function showMemberHoverCard(row, username) {
   if (!activeServerDetail) return;
   const m = activeServerDetail.members.find((item) => item.username.toLowerCase() === username.toLowerCase());
   if (!m) return;
-  memberHoverBanner.style.background = profileBanners.elementForId(m.bannerId || 'none').style.background;
+  memberHoverBanner.style.background = profileBanners.elementForId(m.bannerId || 'none', 'user-banner', m.username).style.background;
   memberHoverAvatarWrap.replaceChildren(profileAvatars.image(m.username));
   memberHoverName.textContent = m.username;
   memberHoverDot.className = `server-member-presence${m.online ? ' online' : ''}`;
@@ -4119,6 +4141,57 @@ adminRefreshBtn.addEventListener('click', loadAdminUsers);
 saveStatusBtn.addEventListener('click', saveStatusMessage);
 statusMessageInput.addEventListener('keydown', (e) => {
   if (e.key === 'Enter') saveStatusBtn.click();
+});
+
+async function handleImageUpload({ input, statusEl, endpoint, field, maxBytes, allowedTypes, remember }) {
+  const file = input.files?.[0];
+  if (!file) return;
+  input.value = '';
+  if (!allowedTypes.includes(file.type)) {
+    statusEl.textContent = 'Desteklenmeyen dosya turu.';
+    statusEl.className = 'status-line error';
+    return;
+  }
+  if (file.size > maxBytes) {
+    statusEl.textContent = `Dosya cok buyuk (en fazla ${Math.floor(maxBytes / (1024 * 1024))}MB).`;
+    statusEl.className = 'status-line error';
+    return;
+  }
+  statusEl.textContent = 'Yukleniyor…';
+  statusEl.className = 'status-line';
+  try {
+    const result = await apiUpload(endpoint, field, file);
+    remember(result);
+    statusEl.textContent = 'Yuklendi.';
+    statusEl.className = 'status-line ok';
+  } catch (error) {
+    statusEl.textContent = error.message;
+    statusEl.className = 'status-line error';
+  }
+}
+
+avatarUploadInput.addEventListener('change', () => {
+  handleImageUpload({
+    input: avatarUploadInput,
+    statusEl: avatarUploadStatusEl,
+    endpoint: '/api/profile/avatar-upload',
+    field: 'avatar',
+    maxBytes: MAX_AVATAR_UPLOAD_BYTES,
+    allowedTypes: ['image/png', 'image/jpeg'],
+    remember: (result) => profileAvatars.remember(result.username, result.avatarId),
+  });
+});
+
+bannerUploadInput.addEventListener('change', () => {
+  handleImageUpload({
+    input: bannerUploadInput,
+    statusEl: bannerUploadStatusEl,
+    endpoint: '/api/profile/banner-upload',
+    field: 'banner',
+    maxBytes: MAX_BANNER_UPLOAD_BYTES,
+    allowedTypes: ['image/png', 'image/jpeg', 'image/gif'],
+    remember: (result) => profileBanners.remember(result.username, result.bannerId),
+  });
 });
 visibilityRadios.forEach((radio) => {
   radio.addEventListener('change', () => {

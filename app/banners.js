@@ -1,6 +1,6 @@
-// Profil banner'lari - avatarlarin aksine harici bir gorsel varligi olmadigindan
-// (yukleme altyapisi yok, CSP img-src 'self' ile sinirli) her banner sabit bir
-// CSS degrade olarak tanimlanir; avatars.js ile ayni yapiyi izler.
+// Profil banner'lari: katalogdan secilenler sabit bir CSS degrade, ozel
+// yuklenenler (bannerId === 'custom') sunucudan gelen gercek bir gorsel
+// (PNG/JPEG/animasyonlu GIF dahil) - avatars.js ile ayni yapiyi izler.
 (() => {
   const catalog = window.BANNER_CATALOG;
   const profiles = new Map();
@@ -9,10 +9,18 @@
 
   function bannerFor(username) {
     const id = profiles.get(String(username).toLowerCase()) || 'none';
+    if (id === 'custom') return { id: 'custom' };
     return catalog.find((b) => b.id === id) || catalog[0];
   }
 
-  function paint(element, banner) {
+  function paint(element, banner, username) {
+    if (banner.id === 'custom') {
+      const base = (window.getServerUrl && window.getServerUrl()) || '';
+      element.style.background = `center / cover no-repeat url("${base}/api/images/banner/${encodeURIComponent(username || '')}")`;
+      element.setAttribute('aria-label', 'Banner');
+      element.title = '';
+      return;
+    }
     element.style.background = banner.gradient === 'none' ? 'var(--muted)' : banner.gradient;
     element.setAttribute('aria-label', banner.label);
     element.title = banner.label;
@@ -23,14 +31,18 @@
     el.className = 'user-banner';
     el.dataset.bannerUser = String(username).toLowerCase();
     el.setAttribute('role', 'img');
-    paint(el, bannerFor(username));
+    paint(el, bannerFor(username), username);
     return el;
   }
 
-  function elementForId(bannerId, className = 'user-banner') {
+  function elementForId(bannerId, className = 'user-banner', username) {
     const el = document.createElement('span');
     el.className = className;
     el.setAttribute('role', 'img');
+    if (bannerId === 'custom') {
+      paint(el, { id: 'custom' }, username);
+      return el;
+    }
     paint(el, catalog.find((b) => b.id === bannerId) || catalog[0]);
     return el;
   }
@@ -39,7 +51,7 @@
     if (!username) return;
     profiles.set(username.toLowerCase(), bannerId || 'none');
     document.querySelectorAll('[data-banner-user]').forEach((el) => {
-      if (el.dataset.bannerUser === username.toLowerCase()) paint(el, bannerFor(username));
+      if (el.dataset.bannerUser === username.toLowerCase()) paint(el, bannerFor(username), username);
     });
     if (activeUsername.toLowerCase() === username.toLowerCase()) renderPicker();
   }

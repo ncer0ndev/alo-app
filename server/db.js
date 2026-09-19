@@ -239,7 +239,7 @@ async function areFriends(idA, idB) {
 
 async function listFriends(userId) {
   const res = await adapter.query({
-    sql: `SELECT u.id, u.username, u.avatar_id, u.status_message FROM friendships f
+    sql: `SELECT u.id, u.username, u.avatar_id, u.avatar_url, u.banner_id, u.banner_url, u.status_message FROM friendships f
           JOIN users u ON u.id = CASE WHEN f.user_a_id = ? THEN f.user_b_id ELSE f.user_a_id END
           WHERE f.user_a_id = ? OR f.user_b_id = ?`,
     args: [userId, userId, userId],
@@ -371,7 +371,7 @@ async function markDmRead(userId, otherUserId, ts) {
 async function listAllUsers() {
   const res = await adapter.query({
     sql: `
-    SELECT u.id, u.username, u.avatar_id, u.created_at,
+    SELECT u.id, u.username, u.avatar_id, u.avatar_url, u.created_at,
       (SELECT COUNT(*) FROM friendships f WHERE f.user_a_id = u.id OR f.user_b_id = u.id) AS friend_count
     FROM users u
     ORDER BY u.created_at DESC
@@ -393,7 +393,29 @@ async function setVisibility(userId, visibility) {
 }
 
 async function setBanner(userId, bannerId) {
-  await adapter.query({ sql: 'UPDATE users SET banner_id = ? WHERE id = ?', args: [bannerId, userId] });
+  const prev = await adapter.query({ sql: 'SELECT banner_public_id FROM users WHERE id = ?', args: [userId] });
+  await adapter.query({
+    sql: 'UPDATE users SET banner_id = ?, banner_url = NULL, banner_public_id = NULL WHERE id = ?',
+    args: [bannerId, userId],
+  });
+  return prev.rows[0]?.banner_public_id || null;
+}
+
+// Katalogdan degil, kullanicinin kendi yukledigi bir gorselden banner
+// ayarlar (Cloudinary URL'i). Onceki ozel gorsel varsa public_id'sini
+// (silinebilmesi icin) geri dondurur.
+async function setBannerUpload(userId, url, publicId) {
+  const prev = await adapter.query({ sql: 'SELECT banner_public_id FROM users WHERE id = ?', args: [userId] });
+  await adapter.query({
+    sql: "UPDATE users SET banner_id = 'custom', banner_url = ?, banner_public_id = ? WHERE id = ?",
+    args: [url, publicId, userId],
+  });
+  return prev.rows[0]?.banner_public_id || null;
+}
+
+async function getBannerUrlByUsername(username) {
+  const res = await adapter.query({ sql: 'SELECT banner_url FROM users WHERE username_lower = ?', args: [username.toLowerCase()] });
+  return res.rows[0]?.banner_url || null;
 }
 
 async function setNotes(userId, notes) {
@@ -515,7 +537,7 @@ async function deleteJoinRequest(serverId, userId) {
 
 async function listJoinRequests(serverId) {
   const res = await adapter.query({
-    sql: `SELECT jr.created_at, u.id AS user_id, u.username, u.avatar_id, req.username AS requested_by_username
+    sql: `SELECT jr.created_at, u.id AS user_id, u.username, u.avatar_id, u.avatar_url, req.username AS requested_by_username
           FROM server_join_requests jr
           JOIN users u ON u.id = jr.user_id
           JOIN users req ON req.id = jr.requested_by_user_id
@@ -539,7 +561,7 @@ async function listServersForUser(userId) {
 
 async function listServerMembers(serverId) {
   const res = await adapter.query({
-    sql: `SELECT u.id, u.username, u.avatar_id, u.banner_id, u.status_message, m.role FROM server_members m
+    sql: `SELECT u.id, u.username, u.avatar_id, u.avatar_url, u.banner_id, u.banner_url, u.status_message, m.role FROM server_members m
           JOIN users u ON u.id = m.user_id
           WHERE m.server_id = ?
           ORDER BY m.joined_at ASC`,
@@ -663,7 +685,7 @@ async function unbanServerMember(serverId, userId) {
 
 async function listServerBans(serverId) {
   const res = await adapter.query({
-    sql: `SELECT u.username, u.avatar_id, b.reason, b.created_at, actor.username AS banned_by
+    sql: `SELECT u.username, u.avatar_id, u.avatar_url, b.reason, b.created_at, actor.username AS banned_by
           FROM server_bans b JOIN users u ON u.id = b.user_id JOIN users actor ON actor.id = b.banned_by_user_id
           WHERE b.server_id = ? ORDER BY b.created_at DESC`,
     args: [serverId],
@@ -696,7 +718,7 @@ async function isEitherUserBlocked(userAId, userBId) {
 
 async function listBlockedUsers(userId) {
   const res = await adapter.query({
-    sql: `SELECT u.username, u.avatar_id, b.created_at FROM user_blocks b
+    sql: `SELECT u.username, u.avatar_id, u.avatar_url, b.created_at FROM user_blocks b
           JOIN users u ON u.id = b.blocked_user_id WHERE b.blocker_user_id = ? ORDER BY b.created_at DESC`,
     args: [userId],
   });
@@ -769,7 +791,7 @@ async function insertServerMessage({ id, serverId, channelId, fromUserId, text, 
 
 async function getServerMessageById(id) {
   const res = await adapter.query({
-    sql: `SELECT m.*, u.username, u.avatar_id FROM server_messages m
+    sql: `SELECT m.*, u.username, u.avatar_id, u.avatar_url FROM server_messages m
           JOIN users u ON u.id = m.from_user_id
           WHERE m.id = ?`,
     args: [id],
@@ -779,7 +801,7 @@ async function getServerMessageById(id) {
 
 async function getServerMessages(channelId, { before, limit = 50 } = {}) {
   const args = [channelId];
-  let sql = `SELECT m.id, m.from_user_id, m.text, m.created_at, u.username, u.avatar_id FROM server_messages m
+  let sql = `SELECT m.id, m.from_user_id, m.text, m.created_at, u.username, u.avatar_id, u.avatar_url FROM server_messages m
              JOIN users u ON u.id = m.from_user_id
              WHERE m.channel_id = ?`;
   if (typeof before === 'number') {
@@ -904,10 +926,38 @@ async function listDmPins(userId) {
   return new Map(res.rows.map((row) => [Number(row.friend_id), Number(row.pinned_at)]));
 }
 
+async function setAvatar(userId, avatarId) {
+  const prev = await adapter.query({ sql: 'SELECT avatar_public_id FROM users WHERE id = ?', args: [userId] });
+  await adapter.query({
+    sql: 'UPDATE users SET avatar_id = ?, avatar_url = NULL, avatar_public_id = NULL WHERE id = ?',
+    args: [avatarId, userId],
+  });
+  return prev.rows[0]?.avatar_public_id || null;
+}
+
+// Katalogdan degil, kullanicinin kendi yukledigi bir gorselden avatar
+// ayarlar (Cloudinary URL'i). Onceki ozel gorsel varsa public_id'sini
+// (silinebilmesi icin) geri dondurur.
+async function setAvatarUpload(userId, url, publicId) {
+  const prev = await adapter.query({ sql: 'SELECT avatar_public_id FROM users WHERE id = ?', args: [userId] });
+  await adapter.query({
+    sql: "UPDATE users SET avatar_id = 'custom', avatar_url = ?, avatar_public_id = ? WHERE id = ?",
+    args: [url, publicId, userId],
+  });
+  return prev.rows[0]?.avatar_public_id || null;
+}
+
+async function getAvatarUrlByUsername(username) {
+  const res = await adapter.query({ sql: 'SELECT avatar_url FROM users WHERE username_lower = ?', args: [username.toLowerCase()] });
+  return res.rows[0]?.avatar_url || null;
+}
+
 module.exports = {
-  async setAvatar(userId, avatarId) {
-    await adapter.query({ sql: 'UPDATE users SET avatar_id = ? WHERE id = ?', args: [avatarId, userId] });
-  },
+  setAvatar,
+  setAvatarUpload,
+  getAvatarUrlByUsername,
+  setBannerUpload,
+  getBannerUrlByUsername,
   setStatusMessage,
   setVisibility,
   setBanner,

@@ -6,13 +6,29 @@ const cors = require('cors');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const rateLimit = require('express-rate-limit');
+const multer = require('multer');
 
 const db = require('./db');
+const cloudinaryStore = require('./cloudinary');
 const avatarCatalog = require('./avatar-catalog.json');
 const bannerCatalog = require('./banner-catalog.json');
+
+// Kullanicinin bildirdigi Content-Type'a guvenmeden, dosyanin ilk baytlarina
+// (magic number) bakarak gercek turunu tespit eder. Yalnizca bu ucu
+// destekliyoruz (banner icin GIF de dahil, profil resmi icin degil).
+function detectImageType(buffer) {
+  if (buffer.length >= 8 && buffer[0] === 0x89 && buffer[1] === 0x50 && buffer[2] === 0x4e && buffer[3] === 0x47) return 'png';
+  if (buffer.length >= 3 && buffer[0] === 0xff && buffer[1] === 0xd8 && buffer[2] === 0xff) return 'jpeg';
+  if (buffer.length >= 6 && buffer.toString('ascii', 0, 3) === 'GIF' && (buffer.toString('ascii', 3, 6) === '87a' || buffer.toString('ascii', 3, 6) === '89a')) return 'gif';
+  return null;
+}
+
+const avatarUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 5 * 1024 * 1024 } });
+const bannerUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 8 * 1024 * 1024 } });
 function publicAvatar(user) {
   const id = user?.avatar_id;
   if (id === 'phoenix' && user?.username?.toLowerCase() !== 'necr0n') return 'panda';
+  if (id === 'custom' && user?.avatar_url) return 'custom';
   return avatarCatalog.some((avatar) => avatar.id === id) ? id : 'panda';
 }
 
@@ -450,7 +466,8 @@ app.post('/api/profile/avatar', requireAuth, friendLimiter, asyncRoute(async (re
   if (avatarId === 'phoenix' && user.username.toLowerCase() !== 'necr0n') {
     return res.status(403).json({ error: 'Anka kusu yalnizca necr0n hesabina ozeldir.' });
   }
-  await db.setAvatar(user.id, avatarId);
+  const oldPublicId = await db.setAvatar(user.id, avatarId);
+  cloudinaryStore.deleteImage(oldPublicId);
   const payload = { username: user.username, avatarId };
   const recipients = new Set(onlineUsers.get(user.username.toLowerCase()) || []);
   for (const sid of recipients) {
@@ -474,7 +491,8 @@ app.post('/api/profile/banner', requireAuth, friendLimiter, asyncRoute(async (re
   if (!user) return res.status(401).json({ error: 'gecersiz oturum' });
   const { bannerId } = req.body || {};
   if (!bannerCatalog.some((banner) => banner.id === bannerId)) return res.status(400).json({ error: 'Gecersiz banner.' });
-  await db.setBanner(user.id, bannerId);
+  const oldPublicId = await db.setBanner(user.id, bannerId);
+  cloudinaryStore.deleteImage(oldPublicId);
   const payload = { username: user.username, bannerId };
   const recipients = new Set(onlineUsers.get(user.username.toLowerCase()) || []);
   for (const sid of recipients) {
@@ -491,6 +509,93 @@ app.post('/api/profile/banner', requireAuth, friendLimiter, asyncRoute(async (re
   }
   for (const sid of recipients) io.to(sid).emit('profile-updated', payload);
   res.json(payload);
+}));
+
+function broadcastProfileUpdate(user, payload) {
+  const recipients = new Set(onlineUsers.get(user.username.toLowerCase()) || []);
+  for (const sid of recipients) {
+    const active = io.sockets.sockets.get(sid);
+    if (active) {
+      if ('avatarId' in payload) active.data.avatarId = payload.avatarId;
+      if ('bannerId' in payload) active.data.bannerId = payload.bannerId;
+    }
+  }
+  db.listFriends(user.id).then((friends) => {
+    for (const friend of friends) {
+      for (const sid of onlineUsers.get(friend.username.toLowerCase()) || []) recipients.add(sid);
+    }
+    for (const room of rooms.values()) {
+      if ([...room.members].some((sid) => io.sockets.sockets.get(sid)?.data.userId === user.id)) {
+        for (const sid of room.members) recipients.add(sid);
+      }
+    }
+    for (const sid of recipients) io.to(sid).emit('profile-updated', payload);
+  });
+}
+
+app.post(
+  '/api/profile/avatar-upload',
+  requireAuth,
+  friendLimiter,
+  avatarUpload.single('avatar'),
+  asyncRoute(async (req, res) => {
+    if (!cloudinaryStore.configured) return res.status(503).json({ error: 'gorsel yukleme su an yapilandirilmamis' });
+    const user = await db.getUserById(req.userId);
+    if (!user) return res.status(401).json({ error: 'gecersiz oturum' });
+    if (!req.file) return res.status(400).json({ error: 'dosya bulunamadi' });
+    const type = detectImageType(req.file.buffer);
+    if (type !== 'png' && type !== 'jpeg') return res.status(400).json({ error: 'yalnizca PNG veya JPEG yukleyebilirsin' });
+
+    const result = await cloudinaryStore.uploadImage(req.file.buffer, 'alo-app/avatars');
+    const oldPublicId = await db.setAvatarUpload(user.id, result.secure_url, result.public_id);
+    cloudinaryStore.deleteImage(oldPublicId);
+
+    const payload = { username: user.username, avatarId: 'custom' };
+    broadcastProfileUpdate(user, payload);
+    res.json(payload);
+  })
+);
+
+app.post(
+  '/api/profile/banner-upload',
+  requireAuth,
+  friendLimiter,
+  bannerUpload.single('banner'),
+  asyncRoute(async (req, res) => {
+    if (!cloudinaryStore.configured) return res.status(503).json({ error: 'gorsel yukleme su an yapilandirilmamis' });
+    const user = await db.getUserById(req.userId);
+    if (!user) return res.status(401).json({ error: 'gecersiz oturum' });
+    if (!req.file) return res.status(400).json({ error: 'dosya bulunamadi' });
+    const type = detectImageType(req.file.buffer);
+    if (type !== 'png' && type !== 'jpeg' && type !== 'gif') {
+      return res.status(400).json({ error: 'yalnizca PNG, JPEG veya GIF yukleyebilirsin' });
+    }
+
+    const result = await cloudinaryStore.uploadImage(req.file.buffer, 'alo-app/banners');
+    const oldPublicId = await db.setBannerUpload(user.id, result.secure_url, result.public_id);
+    cloudinaryStore.deleteImage(oldPublicId);
+
+    const payload = { username: user.username, bannerId: 'custom' };
+    broadcastProfileUpdate(user, payload);
+    res.json(payload);
+  })
+);
+
+// Yuklenen profil resmi/banner gorsellerini sunar - Discord vb. uygulamalardaki
+// avatar CDN'leri gibi kimlik dogrulama gerektirmez (hassas veri degildir);
+// yalnizca gercek Cloudinary adresine yonlendirir, dosyayi kendimiz saklamayiz.
+app.get('/api/images/avatar/:username', asyncRoute(async (req, res) => {
+  if (!isValidUsername(req.params.username)) return res.status(404).end();
+  const url = await db.getAvatarUrlByUsername(req.params.username);
+  if (!url) return res.status(404).end();
+  res.redirect(url);
+}));
+
+app.get('/api/images/banner/:username', asyncRoute(async (req, res) => {
+  if (!isValidUsername(req.params.username)) return res.status(404).end();
+  const url = await db.getBannerUrlByUsername(req.params.username);
+  if (!url) return res.status(404).end();
+  res.redirect(url);
 }));
 
 app.post('/api/profile/notes', requireAuth, friendLimiter, asyncRoute(async (req, res) => {
@@ -1587,6 +1692,17 @@ app.delete(
     res.json({ ok: true });
   })
 );
+
+// multer, dosya limiti asildiginda vb. route handler'a hic girmeden bir
+// hata firlatir - bunu daha spesifik bir mesajla (asagidaki genel
+// yakalayicidan once) JSON olarak dondurur.
+app.use((err, req, res, next) => {
+  if (err instanceof multer.MulterError) {
+    const msg = err.code === 'LIMIT_FILE_SIZE' ? 'dosya cok buyuk' : 'dosya yuklenemedi';
+    return res.status(400).json({ error: msg });
+  }
+  next(err);
+});
 
 app.use((err, _req, res, next) => {
   if (err) return res.status(400).json({ error: 'gecersiz istek' });

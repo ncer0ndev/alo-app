@@ -6,11 +6,22 @@
   let activeUsername = '';
   function avatarFor(username, fallback = 'panda') {
     const id = profiles.get(String(username).toLowerCase()) || fallback;
+    if (id === 'custom') return { id: 'custom' };
     return catalog.find(a => a.id === id && (id !== 'phoenix' || String(username).toLowerCase() === 'necr0n')) || catalog.find(a => a.id === 'panda');
   }
-  function paint(element, avatar) {
+  function paint(element, avatar, username) {
+    if (avatar.id === 'custom') {
+      const base = (window.getServerUrl && window.getServerUrl()) || '';
+      element.style.backgroundImage = `url("${base}/api/images/avatar/${encodeURIComponent(username || '')}")`;
+      element.style.backgroundPosition = 'center';
+      element.style.backgroundSize = 'cover';
+      element.setAttribute('aria-label', 'Profil resmi');
+      element.title = '';
+      return;
+    }
     element.style.backgroundImage = `url("assets/avatars/collection-${avatar.sheet}.jpg")`;
     element.style.backgroundPosition = `${[3.53, 26.8, 50.06, 73.32, 96.58][avatar.column]}% ${avatar.row ? 79.14 : 11.34}%`;
+    element.style.backgroundSize = '585.14% 319.14%';
     element.setAttribute('aria-label', avatar.label);
     element.title = avatar.label;
   }
@@ -19,13 +30,17 @@
     element.className = 'user-avatar';
     element.dataset.avatarUser = String(username).toLowerCase();
     element.setAttribute('role', 'img');
-    paint(element, avatarFor(username, fallback));
+    paint(element, avatarFor(username, fallback), username);
     return element;
   }
-  function imageForId(avatarId, className = 'user-avatar') {
+  function imageForId(avatarId, className = 'user-avatar', username) {
     const element = document.createElement('span');
     element.className = className;
     element.setAttribute('role', 'img');
+    if (avatarId === 'custom') {
+      paint(element, { id: 'custom' }, username);
+      return element;
+    }
     const avatar = catalog.find(a => a.id === avatarId) || catalog.find(a => a.id === 'robot');
     paint(element, avatar);
     return element;
@@ -34,7 +49,7 @@
     if (!username || !avatarId) return;
     profiles.set(username.toLowerCase(), avatarId);
     document.querySelectorAll('[data-avatar-user]').forEach(element => {
-      if (element.dataset.avatarUser === username.toLowerCase()) paint(element, avatarFor(username));
+      if (element.dataset.avatarUser === username.toLowerCase()) paint(element, avatarFor(username), username);
     });
     if (activeUsername.toLowerCase() === username.toLowerCase()) renderPicker();
   }

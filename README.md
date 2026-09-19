@@ -60,6 +60,21 @@ LOGLANMADAN anlaşılır bir hata basılıp süreç sonlanır - hiçbir otomatik
 Tüm ortam değişkenlerinin tam listesi ve açıklamaları için
 `server/.env.example` dosyasına bakın.
 
+## Kullanıcıların kendi profil resmi/banner'ı yüklemesi
+
+Katalogdaki hazır seçeneklerin yanında, kullanıcılar kendi PNG/JPEG profil
+resimlerini ve PNG/JPEG/**animasyonlu GIF** banner'larını yükleyebilir.
+Yüklenen dosyalar veritabanını şişirmemek için harici, ücretsiz bir
+Cloudinary hesabında saklanır - sunucu yalnızca dönen URL'i tutar.
+
+1. [cloudinary.com](https://cloudinary.com) üzerinde ücretsiz bir hesap açın
+   (kredi kartı istemez, 25GB'a kadar ücretsiz).
+2. Dashboard'da görünen **API Environment variable** kutusundaki değeri
+   (örn. `cloudinary://123456789:AbCdEf...@your-cloud-name`) kopyalayıp
+   `CLOUDINARY_URL` olarak sunucunuzun ortam değişkenlerine ekleyin.
+3. Bu değişken boşsa yükleme uç noktaları düzgün bir hata döner; katalogdan
+   seçim (mevcut davranış) etkilenmez.
+
 ## Yerel geliştirme
 
 ```bash

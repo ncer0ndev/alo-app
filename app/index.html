@@ -2,7 +2,7 @@
 <html lang="tr">
 <head>
   <meta charset="UTF-8" />
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; font-src 'self'; connect-src 'self' https://alo-app.onrender.com wss://alo-app.onrender.com; img-src 'self'; media-src 'self' blob:; object-src 'none'; base-uri 'none'; form-action 'none';" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; font-src 'self'; connect-src 'self' https://alo-app.onrender.com wss://alo-app.onrender.com; img-src 'self' https://alo-app.onrender.com https://res.cloudinary.com; media-src 'self' blob:; object-src 'none'; base-uri 'none'; form-action 'none';" />
   <title>ALO</title>
   <script src="theme-init.js"></script>
   <link rel="stylesheet" href="fonts/fonts.css" />
@@ -414,11 +414,21 @@
           <p class="hint-text">Seçimin hesabına kaydedilir ve arkadaşlarına görünür.</p>
           <div id="avatar-grid" class="avatar-grid" role="group" aria-label="Profil resmi seçimi"></div>
           <p id="avatar-status" class="status-line" role="status" aria-live="polite"></p>
+          <label class="btn btn-ghost btn-block upload-btn">
+            [ KENDİ FOTOĞRAFINI YÜKLE (PNG/JPEG) ]
+            <input id="avatar-upload-input" type="file" accept="image/png,image/jpeg" class="upload-input-hidden" />
+          </label>
+          <p id="avatar-upload-status" class="status-line" role="status" aria-live="polite"></p>
 
           <div class="section-header">// banner seç</div>
           <div id="profile-banner-preview" class="profile-banner-preview"></div>
           <div id="banner-grid" class="banner-grid" role="group" aria-label="Banner seçimi"></div>
           <p id="banner-status" class="status-line" role="status" aria-live="polite"></p>
+          <label class="btn btn-ghost btn-block upload-btn">
+            [ KENDİ BANNER'INI YÜKLE (PNG/JPEG/GIF) ]
+            <input id="banner-upload-input" type="file" accept="image/png,image/jpeg,image/gif" class="upload-input-hidden" />
+          </label>
+          <p id="banner-upload-status" class="status-line" role="status" aria-live="polite"></p>
 
           <div class="section-header">// durum mesajı</div>
           <label class="field">
