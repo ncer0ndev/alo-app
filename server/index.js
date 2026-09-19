@@ -50,6 +50,7 @@ const CHAT_MAX_LENGTH = 2000;
 const CHAT_HISTORY_LIMIT = 100;
 const CHAT_RATE_LIMIT = 8;
 const CHAT_RATE_WINDOW_MS = 10_000;
+const MESSAGE_DELETE_FOR_EVERYONE_WINDOW_MS = 5 * 60 * 1000;
 
 function isNonEmptyString(v, maxLen) {
   return typeof v === 'string' && v.length > 0 && v.length <= maxLen;
@@ -910,6 +911,8 @@ app.get(
           avatarId: publicAvatar(friend),
           bannerId: friend.banner_id || '',
           online: isUserOnline(friend.username),
+          statusMessage: friend.status_message || '',
+          ...gameStatusFields(friend.username.toLowerCase()),
           lastText: last ? last.text : null,
           lastAt: last ? Number(last.created_at) : null,
           lastFromSelf: last ? Number(last.from_user_id) === req.userId : null,
@@ -1301,7 +1304,7 @@ app.get(
     if (!ctx) return;
     const beforeRaw = Number(req.query.before);
     const before = Number.isFinite(beforeRaw) && beforeRaw > 0 ? beforeRaw : undefined;
-    const rows = await db.getServerMessages(channelId, { before, limit: 50 });
+    const rows = await db.getServerMessages(channelId, req.userId, { before, limit: 50 });
     res.json({
       messages: rows.map((m) => ({
         id: m.id,
@@ -1955,16 +1958,22 @@ io.on('connection', (socket) => {
 
       const isOwnMessage = Number(message.from_user_id) === userId;
       const canModerate = member.role === 'owner' || member.role === 'moderator';
-      if (!isOwnMessage && !canModerate) return ack({ error: 'bu mesaji silme yetkin yok' });
+      const withinWindow = Date.now() - Number(message.created_at) <= MESSAGE_DELETE_FOR_EVERYONE_WINDOW_MS;
 
-      await db.deleteServerMessage(messageId);
-      await db.addServerAuditLog(message.server_id, userId, isOwnMessage ? 'own_message_deleted' : 'message_moderated', message.username, messageId);
-      ack({ ok: true });
-      emitToServerMembers(message.server_id, 'server-message-deleted', {
-        serverId: message.server_id,
-        channelId: message.channel_id,
-        messageId,
-      }).catch((err) => console.error('server-message-deleted yayin hatasi:', err.message));
+      if (canModerate || (isOwnMessage && withinWindow)) {
+        await db.deleteServerMessage(messageId);
+        await db.addServerAuditLog(message.server_id, userId, isOwnMessage ? 'own_message_deleted' : 'message_moderated', message.username, messageId);
+        ack({ ok: true, mode: 'everyone' });
+        emitToServerMembers(message.server_id, 'server-message-deleted', {
+          serverId: message.server_id,
+          channelId: message.channel_id,
+          messageId,
+        }).catch((err) => console.error('server-message-deleted yayin hatasi:', err.message));
+        return;
+      }
+
+      await db.hideServerMessageForUser(messageId, userId);
+      ack({ ok: true, mode: 'me' });
     })().catch((err) => {
       console.error('delete-server-message hatasi:', err.message);
       ack({ error: 'sunucu hatasi' });
@@ -2135,6 +2144,39 @@ io.on('connection', (socket) => {
       ack({ ok: true, message });
     })().catch((err) => {
       console.error('dm-message hatasi:', err.message);
+      ack({ error: 'sunucu hatasi' });
+    });
+  });
+
+  socket.on('delete-dm-message', (payload, ack) => {
+    if (typeof ack !== 'function') ack = () => {};
+    const { messageId } = payload || {};
+    if (typeof messageId !== 'string' || messageId.length === 0 || messageId.length > 64) {
+      return ack({ error: 'gecersiz istek' });
+    }
+
+    (async () => {
+      const message = await db.getDirectMessageById(messageId);
+      if (!message) return ack({ error: 'mesaj bulunamadi' });
+      const fromId = Number(message.from_user_id);
+      const toId = Number(message.to_user_id);
+      if (userId !== fromId && userId !== toId) return ack({ error: 'bu mesaji silme yetkin yok' });
+
+      const isOwnMessage = userId === fromId;
+      const withinWindow = Date.now() - Number(message.created_at) <= MESSAGE_DELETE_FOR_EVERYONE_WINDOW_MS;
+
+      if (isOwnMessage && withinWindow) {
+        await db.deleteDirectMessage(messageId);
+        ack({ ok: true, mode: 'everyone' });
+        const other = await db.getUserById(toId);
+        if (other) emitToUser(other.username, 'dm-message-deleted', { messageId, withUsername: username });
+        return;
+      }
+
+      await db.hideDirectMessageForUser(messageId, userId);
+      ack({ ok: true, mode: 'me' });
+    })().catch((err) => {
+      console.error('delete-dm-message hatasi:', err.message);
       ack({ error: 'sunucu hatasi' });
     });
   });

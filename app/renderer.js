@@ -1549,6 +1549,9 @@ function renderChatLog() {
     const div = document.createElement('div');
     div.className = `chat-message ${m.own ? 'own' : ''} ${m.pending ? 'pending' : ''} ${m.failed ? 'failed' : ''}`.trim();
 
+    const body = document.createElement('div');
+    body.className = 'message-body';
+
     const meta = document.createElement('div');
     meta.className = 'meta';
     let metaText = `${m.from} · ${formatChatTime(m.ts)}`;
@@ -1561,7 +1564,8 @@ function renderChatLog() {
     text.className = 'text';
     text.textContent = m.text;
 
-    div.append(meta, text);
+    body.append(meta, text);
+    div.append(body);
 
     if (m.failed) {
       const retryBtn = document.createElement('button');
@@ -1696,7 +1700,7 @@ function renderDmConversations() {
     preview.textContent = conv.lastText ? `${conv.lastFromSelf ? 'sen: ' : ''}${conv.lastText}` : 'henüz mesaj yok';
     main.append(nameSpan, preview);
 
-    li.append(dot, main);
+    li.append(profileAvatars.image(conv.username), dot, main);
 
     const pinBtn = document.createElement('button');
     pinBtn.className = 'btn btn-ghost pin-btn';
@@ -1787,6 +1791,10 @@ async function loadDmConversations() {
     if (!res.ok) return;
     const data = await res.json();
     dmConversations = data.conversations;
+    for (const conv of dmConversations) {
+      profileAvatars.remember(conv.username, conv.avatarId);
+      profileBanners.remember(conv.username, conv.bannerId);
+    }
     if (!currentDmUsername) renderDmConversations();
     else updateDmTabBadge();
   } catch {
@@ -1819,11 +1827,26 @@ function scrollDmToBottom() {
   dmScrollBtn.classList.add('hidden');
 }
 
+function dmMessageDeleteLabel(m) {
+  const withinWindow = Date.now() - m.ts <= MESSAGE_DELETE_FOR_EVERYONE_WINDOW_MS;
+  return m.own && withinWindow ? '[ SİL ]' : '[ BENDEN SİL ]';
+}
+
 function renderDmLog() {
   dmLogEl.innerHTML = '';
+  const myUsername = getSession().username;
   for (const m of dmMessages) {
     const div = document.createElement('div');
-    div.className = `chat-message ${m.own ? 'own' : ''} ${m.pending ? 'pending' : ''} ${m.failed ? 'failed' : ''}`.trim();
+    div.className = `chat-message dm-chat-message ${m.own ? 'own' : ''} ${m.pending ? 'pending' : ''} ${m.failed ? 'failed' : ''}`.trim();
+
+    const authorUsername = m.own ? myUsername : m.from;
+    const avatar = profileAvatars.image(authorUsername);
+    avatar.classList.add('dm-message-avatar');
+    avatar.addEventListener('mouseenter', () => showDmPeerHoverCard(avatar, authorUsername));
+    avatar.addEventListener('mouseleave', hideMemberHoverCard);
+
+    const body = document.createElement('div');
+    body.className = 'dm-message-body';
 
     const meta = document.createElement('div');
     meta.className = 'meta';
@@ -1836,7 +1859,7 @@ function renderDmLog() {
     text.className = 'text';
     text.textContent = m.text;
 
-    div.append(meta, text);
+    body.append(meta, text);
 
     if (m.failed) {
       const retryBtn = document.createElement('button');
@@ -1848,7 +1871,16 @@ function renderDmLog() {
         renderDmLog();
         sendDmWithRetry(m);
       };
-      div.appendChild(retryBtn);
+      body.appendChild(retryBtn);
+      div.append(avatar, body);
+    } else if (!m.pending) {
+      const delBtn = document.createElement('button');
+      delBtn.className = 'btn btn-ghost retry-btn';
+      delBtn.textContent = dmMessageDeleteLabel(m);
+      delBtn.onclick = () => deleteDmMessage(m.id);
+      div.append(avatar, body, delBtn);
+    } else {
+      div.append(avatar, body);
     }
 
     dmLogEl.appendChild(div);
@@ -1972,6 +2004,16 @@ function sendDmMessage() {
   autoResizeDmInput();
 
   sendDmWithRetry(localMsg);
+}
+
+async function deleteDmMessage(messageId) {
+  const ack = await emitWithTimeout('delete-dm-message', { messageId });
+  if (!ack || ack.error) {
+    showToast(ack?.error || 'mesaj silinemedi', 'error');
+    return;
+  }
+  dmMessages = dmMessages.filter((m) => m.id !== messageId);
+  renderDmLog();
 }
 
 // ---- sunucular (topluluklar) ----
@@ -2117,7 +2159,7 @@ function enterHomeMode() {
   channelEditMode = false;
   hideMemberHoverCard();
   closeTextChannel();
-  communityRail.classList.remove('collapsed', 'reveal-ready');
+  communityRail.classList.remove('collapsed');
   railHomeBtn.classList.add('active');
   homeArea.classList.remove('hidden');
   communityArea.classList.add('hidden');
@@ -2128,7 +2170,6 @@ function enterHomeMode() {
 
 function enterCommunityMode() {
   communityRail.classList.add('collapsed');
-  communityRail.classList.remove('reveal-ready');
   railHomeBtn.classList.remove('active');
   homeArea.classList.add('hidden');
   communityArea.classList.remove('hidden');
@@ -2231,31 +2272,47 @@ function formatGameDuration(sinceMs) {
   return rest > 0 ? `${hours} sa ${rest} dk'dır` : `${hours} saattir`;
 }
 
-function showMemberHoverCard(row, username) {
-  if (!activeServerDetail) return;
-  const m = activeServerDetail.members.find((item) => item.username.toLowerCase() === username.toLowerCase());
-  if (!m) return;
-  memberHoverBanner.style.background = profileBanners.elementForId(m.bannerId || 'none', 'user-banner', m.username).style.background;
-  memberHoverAvatarWrap.replaceChildren(profileAvatars.image(m.username));
-  memberHoverName.textContent = m.username;
-  memberHoverDot.className = `server-member-presence${m.online ? ' online' : ''}`;
-  memberHoverRole.textContent = serverRoleLabel(m.role);
-  memberHoverStatus.textContent = m.statusMessage || (m.online ? 'Çevrimiçi' : 'Çevrimdışı');
-  if (m.game) {
-    memberHoverGame.textContent = `🎮 ${m.game} · ${formatGameDuration(m.gameSince)}`;
+function showHoverCard(anchorEl, info) {
+  memberHoverBanner.style.background = profileBanners.element(info.username).style.background;
+  memberHoverAvatarWrap.replaceChildren(profileAvatars.image(info.username));
+  memberHoverName.textContent = info.username;
+  memberHoverDot.className = `server-member-presence${info.online ? ' online' : ''}`;
+  memberHoverRole.textContent = info.role ? serverRoleLabel(info.role) : '';
+  memberHoverRole.classList.toggle('hidden', !info.role);
+  memberHoverStatus.textContent = info.statusMessage || (info.online ? 'Çevrimiçi' : 'Çevrimdışı');
+  if (info.game) {
+    memberHoverGame.textContent = `🎮 ${info.game} · ${formatGameDuration(info.gameSince)}`;
     memberHoverGame.classList.remove('hidden');
   } else {
     memberHoverGame.classList.add('hidden');
   }
 
-  const rowRect = row.getBoundingClientRect();
+  const anchorRect = anchorEl.getBoundingClientRect();
   memberHoverCard.classList.remove('hidden');
   const cardRect = memberHoverCard.getBoundingClientRect();
-  const left = Math.max(8, rowRect.left - cardRect.width - 10);
-  let top = rowRect.top;
+  const left = Math.max(8, anchorRect.left - cardRect.width - 10);
+  let top = anchorRect.top;
   if (top + cardRect.height > window.innerHeight - 8) top = window.innerHeight - cardRect.height - 8;
   memberHoverCard.style.left = `${left}px`;
   memberHoverCard.style.top = `${Math.max(8, top)}px`;
+}
+
+function showMemberHoverCard(row, username) {
+  if (!activeServerDetail) return;
+  const m = activeServerDetail.members.find((item) => item.username.toLowerCase() === username.toLowerCase());
+  if (!m) return;
+  showHoverCard(row, m);
+}
+
+function showDmPeerHoverCard(anchorEl, username) {
+  const isSelf = username.toLowerCase() === getSession().username?.toLowerCase();
+  if (isSelf) {
+    showHoverCard(anchorEl, { username, online: true, statusMessage: statusMessageInput.value });
+    return;
+  }
+  const conv = findDmConversation(username);
+  if (!conv) return;
+  showHoverCard(anchorEl, conv);
 }
 
 function hideMemberHoverCard() {
@@ -3156,10 +3213,12 @@ async function openServerAndTextChannel(serverId, channelId) {
   if (channel && channel.type === 'text') openTextChannel(serverId, channelId, channel.name);
 }
 
-function canDeleteTextMessage(m) {
-  if (m.own) return true;
-  if (!activeServerDetail || !currentTextChannel || activeServerDetail.id !== currentTextChannel.serverId) return false;
-  return activeServerDetail.role === 'owner' || activeServerDetail.role === 'moderator';
+const MESSAGE_DELETE_FOR_EVERYONE_WINDOW_MS = 5 * 60 * 1000;
+
+function textMessageDeleteLabel(m) {
+  const canModerate = activeServerDetail && (activeServerDetail.role === 'owner' || activeServerDetail.role === 'moderator');
+  const withinWindow = Date.now() - m.ts <= MESSAGE_DELETE_FOR_EVERYONE_WINDOW_MS;
+  return canModerate || (m.own && withinWindow) ? '[ SİL ]' : '[ BENDEN SİL ]';
 }
 
 function scrollTextChannelToBottom() {
@@ -3179,6 +3238,9 @@ function renderTextChannelLog({ preserveScroll = false } = {}) {
     div.className = `chat-message ${m.own ? 'own' : ''} ${m.pending ? 'pending' : ''} ${m.failed ? 'failed' : ''}`.trim();
     div.dataset.messageId = m.id;
 
+    const body = document.createElement('div');
+    body.className = 'message-body';
+
     const meta = document.createElement('div');
     meta.className = 'meta';
     let metaText = `${m.from} · ${formatChatTime(m.ts)}`;
@@ -3191,7 +3253,8 @@ function renderTextChannelLog({ preserveScroll = false } = {}) {
     text.className = 'text';
     text.textContent = m.text;
 
-    div.append(meta, text);
+    body.append(meta, text);
+    div.append(body);
 
     if (m.failed) {
       const retryBtn = document.createElement('button');
@@ -3204,10 +3267,10 @@ function renderTextChannelLog({ preserveScroll = false } = {}) {
         sendTextChannelMessageWithRetry(m);
       };
       div.appendChild(retryBtn);
-    } else if (!m.pending && canDeleteTextMessage(m)) {
+    } else if (!m.pending) {
       const delBtn = document.createElement('button');
       delBtn.className = 'btn btn-ghost retry-btn';
-      delBtn.textContent = '[ SİL ]';
+      delBtn.textContent = textMessageDeleteLabel(m);
       delBtn.onclick = () => deleteTextChannelMessage(m.id);
       div.appendChild(delBtn);
     }
@@ -3780,6 +3843,14 @@ function connectSocket() {
       });
     }
   });
+
+  socket.on('dm-message-deleted', ({ messageId, withUsername }) => {
+    if (currentDmUsername && withUsername && currentDmUsername.toLowerCase() === withUsername.toLowerCase()) {
+      dmMessages = dmMessages.filter((m) => m.id !== messageId);
+      renderDmLog();
+    }
+    loadDmConversations();
+  });
 }
 
 async function rejoinAfterReconnect() {
@@ -4275,21 +4346,6 @@ joinServerCodeInput.addEventListener('keydown', (e) => {
 });
 serverBackBtn.addEventListener('click', closeServerDetail);
 serverSettingsGearBtn.addEventListener('click', closeTextChannel);
-// Taskbar'a kuculmus rayin uzerinde fare beklerken, genislik gecisi
-// (0.28s) bitmeden icerik gorunur olmasin - aksi halde metin ara
-// genisliklerde satira bolunup kisa sureli cirkin bir zipliyor gorunum
-// ve gecici bir kaydirma cubugu ortaya cikariyordu.
-let railRevealTimer = null;
-communityRail.addEventListener('mouseenter', () => {
-  if (!communityRail.classList.contains('collapsed')) return;
-  clearTimeout(railRevealTimer);
-  railRevealTimer = setTimeout(() => communityRail.classList.add('reveal-ready'), 280);
-});
-communityRail.addEventListener('mouseleave', () => {
-  clearTimeout(railRevealTimer);
-  communityRail.classList.remove('reveal-ready');
-});
-
 railHomeBtn.addEventListener('click', enterHomeMode);
 joinTitlebarHomeBtn.addEventListener('click', enterHomeMode);
 roomTitlebarHomeBtn.addEventListener('click', () => {

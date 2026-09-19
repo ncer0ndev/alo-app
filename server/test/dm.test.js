@@ -15,6 +15,7 @@ process.env.PORT = '0';
 process.env.DB_PATH = path.join(os.tmpdir(), `alo-dm-${randomUUID()}.db`);
 
 const db = require('../db');
+const adapter = require('../db-adapter');
 const { server, io, ready } = require('../index');
 const sockets = [];
 const event = (socket, name) => new Promise((resolve) => socket.once(name, resolve));
@@ -120,4 +121,62 @@ test('dm: yalnizca arkadaslar mesajlasabilir, kalicidir, okunmadi sayaci dogru c
   assert.ok(afterUnfriend.error, 'arkadasliktan cikinca DM gonderimi reddedilmeli');
   const historyAfterUnfriend = await fetch(`${base}/api/dm/${alice.username}/messages`, { headers: authHeader(bob) });
   assert.equal(historyAfterUnfriend.status, 403, 'arkadasliktan cikinca gecmis de goruntulenememeli');
+});
+
+test('dm: 5 dakika icinde herkesten silinebilir, sonrasinda yalnizca kendinden gizlenir, alici her zaman yalnizca kendinden gizleyebilir', { timeout: 15000 }, async () => {
+  await ready;
+  const base = `http://127.0.0.1:${server.address().port}`;
+  const users = [];
+  for (const username of ['dmCarol', 'dmDave']) {
+    const userId = await db.createUser(username, 'unused-test-hash');
+    const token = jwt.sign({ userId, username }, process.env.JWT_SECRET);
+    const socket = connect(base, { auth: { token }, reconnection: false, forceNew: true });
+    sockets.push(socket);
+    await event(socket, 'authenticated');
+    users.push({ userId, username, token, socket });
+  }
+  const [carol, dave] = users;
+  const authHeader = (u) => ({ Authorization: `Bearer ${u.token}` });
+  await db.createFriendRequest(carol.userId, dave.userId);
+  await db.acceptFriendRequest(carol.userId, dave.userId);
+
+  // Taze mesaj: gonderen 5 dakika icinde herkesten silebilir, karsi taraf da alir.
+  const freshAck = await emit(carol.socket, 'dm-message', { toUsername: dave.username, text: 'taze mesaj', clientMessageId: randomUUID() });
+  assert.equal(freshAck.ok, true);
+  const daveNotified = event(dave.socket, 'dm-message-deleted');
+  const freshDelete = await emit(carol.socket, 'delete-dm-message', { messageId: freshAck.message.id });
+  assert.equal(freshDelete.ok, true);
+  assert.equal(freshDelete.mode, 'everyone');
+  const notice = await daveNotified;
+  assert.equal(notice.messageId, freshAck.message.id);
+  const goneForBoth = await db.getDirectMessages(dave.userId, carol.userId, { limit: 10 });
+  assert.ok(!goneForBoth.some((m) => m.id === freshAck.message.id));
+
+  // Eski mesaj (5 dakikayi gecmis): gonderen artik herkesten silemez, yalnizca kendinden gizler.
+  const oldAck = await emit(carol.socket, 'dm-message', { toUsername: dave.username, text: 'eski mesaj', clientMessageId: randomUUID() });
+  await adapter.query({ sql: 'UPDATE direct_messages SET created_at = ? WHERE id = ?', args: [Date.now() - 6 * 60 * 1000, oldAck.message.id] });
+  const lateDelete = await emit(carol.socket, 'delete-dm-message', { messageId: oldAck.message.id });
+  assert.equal(lateDelete.ok, true);
+  assert.equal(lateDelete.mode, 'me');
+  const stillThereForDave = await db.getDirectMessages(dave.userId, carol.userId, { limit: 10 });
+  assert.ok(stillThereForDave.some((m) => m.id === oldAck.message.id), 'alici icin hala durmali');
+  const hiddenForCarol = await db.getDirectMessages(carol.userId, dave.userId, { limit: 10 });
+  assert.ok(!hiddenForCarol.some((m) => m.id === oldAck.message.id), 'gonderenin kendi gorunumunden gizlenmis olmali');
+
+  // Alici, taze bir mesaji bile herkesten silemez - yalnizca kendinden gizleyebilir.
+  const forRecipient = await emit(carol.socket, 'dm-message', { toUsername: dave.username, text: 'aliciya', clientMessageId: randomUUID() });
+  const recipientDelete = await emit(dave.socket, 'delete-dm-message', { messageId: forRecipient.message.id });
+  assert.equal(recipientDelete.ok, true);
+  assert.equal(recipientDelete.mode, 'me', 'alici mesaji herkesten silememeli');
+  const stillThereForCarol = await db.getDirectMessages(carol.userId, dave.userId, { limit: 10 });
+  assert.ok(stillThereForCarol.some((m) => m.id === forRecipient.message.id), 'gonderen icin hala durmali');
+
+  // Ilgisiz bir kullanici baskasinin DM'sini silemez.
+  const outsiderUserId = await db.createUser('dmOutsider', 'unused-test-hash');
+  const outsiderToken = jwt.sign({ userId: outsiderUserId, username: 'dmOutsider' }, process.env.JWT_SECRET);
+  const outsiderSocket = connect(base, { auth: { token: outsiderToken }, reconnection: false, forceNew: true });
+  sockets.push(outsiderSocket);
+  await event(outsiderSocket, 'authenticated');
+  const outsiderDelete = await emit(outsiderSocket, 'delete-dm-message', { messageId: forRecipient.message.id });
+  assert.ok(outsiderDelete.error, 'ilgisiz kullanici DM silemez');
 });

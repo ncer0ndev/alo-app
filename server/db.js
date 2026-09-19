@@ -320,9 +320,10 @@ async function insertDirectMessage({ id, fromUserId, toUserId, text, createdAt }
 }
 
 async function getDirectMessages(userId, otherUserId, { before, limit = 50 } = {}) {
-  const args = [userId, otherUserId, otherUserId, userId];
+  const args = [userId, otherUserId, otherUserId, userId, userId];
   let sql = `SELECT id, from_user_id, to_user_id, text, created_at FROM direct_messages
-             WHERE ((from_user_id = ? AND to_user_id = ?) OR (from_user_id = ? AND to_user_id = ?))`;
+             WHERE ((from_user_id = ? AND to_user_id = ?) OR (from_user_id = ? AND to_user_id = ?))
+             AND NOT EXISTS (SELECT 1 FROM dm_message_hides h WHERE h.message_id = direct_messages.id AND h.user_id = ?)`;
   if (typeof before === 'number') {
     sql += ' AND created_at < ?';
     args.push(before);
@@ -331,6 +332,25 @@ async function getDirectMessages(userId, otherUserId, { before, limit = 50 } = {
   args.push(limit);
   const res = await adapter.query({ sql, args });
   return res.rows.reverse();
+}
+
+async function getDirectMessageById(id) {
+  const res = await adapter.query({
+    sql: 'SELECT id, from_user_id, to_user_id, text, created_at FROM direct_messages WHERE id = ?',
+    args: [id],
+  });
+  return res.rows[0] || null;
+}
+
+async function deleteDirectMessage(id) {
+  await adapter.query({ sql: 'DELETE FROM direct_messages WHERE id = ?', args: [id] });
+}
+
+async function hideDirectMessageForUser(messageId, userId) {
+  await adapter.query({
+    sql: 'INSERT INTO dm_message_hides (message_id, user_id) VALUES (?, ?) ON CONFLICT (message_id, user_id) DO NOTHING',
+    args: [messageId, userId],
+  });
 }
 
 async function getLastDirectMessage(userId, otherUserId) {
@@ -799,11 +819,12 @@ async function getServerMessageById(id) {
   return res.rows[0] || null;
 }
 
-async function getServerMessages(channelId, { before, limit = 50 } = {}) {
-  const args = [channelId];
+async function getServerMessages(channelId, userId, { before, limit = 50 } = {}) {
+  const args = [channelId, userId];
   let sql = `SELECT m.id, m.from_user_id, m.text, m.created_at, u.username, u.avatar_id, u.avatar_url FROM server_messages m
              JOIN users u ON u.id = m.from_user_id
-             WHERE m.channel_id = ?`;
+             WHERE m.channel_id = ?
+             AND NOT EXISTS (SELECT 1 FROM server_message_hides h WHERE h.message_id = m.id AND h.user_id = ?)`;
   if (typeof before === 'number') {
     sql += ' AND m.created_at < ?';
     args.push(before);
@@ -816,6 +837,13 @@ async function getServerMessages(channelId, { before, limit = 50 } = {}) {
 
 async function deleteServerMessage(id) {
   await adapter.query({ sql: 'DELETE FROM server_messages WHERE id = ?', args: [id] });
+}
+
+async function hideServerMessageForUser(messageId, userId) {
+  await adapter.query({
+    sql: 'INSERT INTO server_message_hides (message_id, user_id) VALUES (?, ?) ON CONFLICT (message_id, user_id) DO NOTHING',
+    args: [messageId, userId],
+  });
 }
 
 async function getChannelReadState(userId, channelId) {
@@ -980,6 +1008,9 @@ module.exports = {
   removeFriend,
   insertDirectMessage,
   getDirectMessages,
+  getDirectMessageById,
+  deleteDirectMessage,
+  hideDirectMessageForUser,
   getLastDirectMessage,
   getDmReadState,
   countUnreadDirectMessages,
@@ -1015,6 +1046,7 @@ module.exports = {
   getServerMessageById,
   getServerMessages,
   deleteServerMessage,
+  hideServerMessageForUser,
   getChannelReadState,
   markChannelRead,
   getUnreadCountsByChannel,

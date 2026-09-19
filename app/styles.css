@@ -931,6 +931,12 @@ input[type="range"] {
   font-family: var(--font-ui);
 }
 
+.friend-row .user-avatar {
+  width: 32px;
+  height: 32px;
+  flex: 0 0 32px;
+}
+
 .friend-row .name {
   flex: 1;
   min-width: 0;
@@ -1256,6 +1262,15 @@ textarea:focus-visible,
 .chat-message {
   margin-bottom: 10px;
   word-break: break-word;
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.chat-message .message-body,
+.chat-message .dm-message-body {
+  flex: 1;
+  min-width: 0;
 }
 
 .chat-message .meta {
@@ -1295,9 +1310,15 @@ textarea:focus-visible,
 }
 
 .chat-message .retry-btn {
-  margin-top: 4px;
+  flex: 0 0 auto;
+  margin-left: auto;
   padding: 3px 8px;
   font-size: 10px;
+  white-space: nowrap;
+}
+
+.chat-message .dm-message-avatar {
+  display: none;
 }
 
 .chat-scroll-btn {

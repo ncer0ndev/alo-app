@@ -14,6 +14,7 @@ process.env.PORT = '0';
 process.env.DB_PATH = path.join(os.tmpdir(), `alo-server-text-${randomUUID()}.db`);
 
 const db = require('../db');
+const adapter = require('../db-adapter');
 const { server, io, ready } = require('../index');
 const sockets = [];
 const event = (socket, name, ms = 3000) =>
@@ -159,7 +160,7 @@ test('metin kanali: bos/cok uzun mesaj reddedilir, hiz siniri calisir, ayni clie
   assert.equal(second.ok, true);
   assert.equal(first.message.id, second.message.id, 'ayni clientMessageId ikinci kayit olusturmamali');
 
-  const stored = await db.getServerMessages(channel.id, { limit: 100 });
+  const stored = await db.getServerMessages(channel.id, owner.userId, { limit: 100 });
   const matching = stored.filter((m) => m.id === first.message.id);
   assert.equal(matching.length, 1, 'veritabaninda tek kayit olmali');
 
@@ -188,7 +189,7 @@ test('metin kanali: mesajlar veritabaninda kalici saklanir (oda sohbeti gibi bel
   // Dogrudan veritabanindan okunabiliyor olmasi, mesajin sunucu surecinin
   // bellek-ici 'rooms' Map'inde degil, dosya tabanli tabloda tutuldugunu kanitlar;
   // sure yeniden baslatilsa bile bu satir DB dosyasinda kalmaya devam eder.
-  const rows = await db.getServerMessages(channel.id, { limit: 10 });
+  const rows = await db.getServerMessages(channel.id, owner.userId, { limit: 10 });
   assert.ok(rows.some((r) => r.text === 'kalici mesaj'));
 
   const historyRes = await fetch(`${base}/api/servers/${srv.id}/channels/${channel.id}/messages`, {
@@ -212,9 +213,15 @@ test('metin kanali: normal uye baskasinin mesajini silemez, kendi mesajini sileb
   assert.equal(ownerMsgAck.ok, true);
   assert.equal(memberMsgAck.ok, true);
 
-  // Sade uye (other), baskasinin (member) mesajini silemez.
-  const forbiddenDelete = await emit(other.socket, 'delete-server-message', { messageId: memberMsgAck.message.id });
-  assert.ok(forbiddenDelete.error);
+  // Sade uye (other), baskasinin (member) mesajini herkesten silemez - yalnizca
+  // kendi gorunumunden gizleyebilir (digerleri icin mesaj hala duruyor).
+  const hideForOther = await emit(other.socket, 'delete-server-message', { messageId: memberMsgAck.message.id });
+  assert.equal(hideForOther.ok, true);
+  assert.equal(hideForOther.mode, 'me');
+  const stillVisibleForMember = await db.getServerMessages(channel.id, member.userId, { limit: 10 });
+  assert.ok(stillVisibleForMember.some((m) => m.id === memberMsgAck.message.id), 'mesaj sahibi icin hala gorunur olmali');
+  const hiddenForOther = await db.getServerMessages(channel.id, other.userId, { limit: 10 });
+  assert.ok(!hiddenForOther.some((m) => m.id === memberMsgAck.message.id), 'other icin artik gorunmemeli');
 
   // Uye kendi mesajini silebilir.
   const memberDeletesOwn = event(owner.socket, 'server-message-deleted');
@@ -233,8 +240,33 @@ test('metin kanali: normal uye baskasinin mesajini silemez, kendi mesajini sileb
   const modDelete = await emit(other.socket, 'delete-server-message', { messageId: ownerMsgAck.message.id });
   assert.equal(modDelete.ok, true, 'moderator baskasinin mesajini silebilmeli');
 
-  const remaining = await db.getServerMessages(channel.id, { limit: 10 });
+  const remaining = await db.getServerMessages(channel.id, owner.userId, { limit: 10 });
   assert.equal(remaining.length, 0);
+});
+
+test('metin kanali: 5 dakika sonra kendi mesajini artik herkesten silemez, yalnizca kendinden gizleyebilir', { timeout: 20000 }, async () => {
+  await ready;
+  const base = `http://127.0.0.1:${server.address().port}`;
+  const owner = await makeUser(base, 'txtOwner8');
+  const member = await makeUser(base, 'txtMember8');
+  const { channel } = await createTextServer(base, owner, member);
+
+  const msgAck = await emit(member.socket, 'send-server-message', { channelId: channel.id, text: 'eski mesaj', clientMessageId: randomUUID() });
+  assert.equal(msgAck.ok, true);
+
+  await adapter.query({
+    sql: 'UPDATE server_messages SET created_at = ? WHERE id = ?',
+    args: [Date.now() - 6 * 60 * 1000, msgAck.message.id],
+  });
+
+  const lateDelete = await emit(member.socket, 'delete-server-message', { messageId: msgAck.message.id });
+  assert.equal(lateDelete.ok, true);
+  assert.equal(lateDelete.mode, 'me', '5 dakikayi gecmis kendi mesaji artik herkesten silinemez');
+
+  const stillThereForOwner = await db.getServerMessages(channel.id, owner.userId, { limit: 10 });
+  assert.ok(stillThereForOwner.some((m) => m.id === msgAck.message.id), 'mesaj digerleri icin hala durmali');
+  const hiddenForMember = await db.getServerMessages(channel.id, member.userId, { limit: 10 });
+  assert.ok(!hiddenForMember.some((m) => m.id === msgAck.message.id), 'kendi gorunumunden gizlenmis olmali');
 });
 
 test('metin kanali: okunmamis mesaj sayisi ve okundu durumu dogru calisir', { timeout: 20000 }, async () => {
