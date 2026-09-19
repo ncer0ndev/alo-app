@@ -3,6 +3,15 @@
   const root = document.documentElement;
   const tabs = [...document.querySelectorAll('.tab-btn')];
   const bar = document.querySelector('.tab-bar');
+  const intros = {
+    friends: ['Arkadaşların', 'Birlikte vakit geçirmek için birini ara veya sohbet başlat.'],
+    dm: ['Mesajlar', 'Sohbetlerine kaldığın yerden devam et.'],
+    settings: ['Ayarlar', 'ALO’yu kendine göre düzenle.'],
+    profile: ['Profilin', 'Seni anlatan bir görünüm seç.'],
+    notepad: ['Not defteri', 'Fikirlerin ve hatırlamak istediklerin, bir arada.'],
+    create: ['Yeni bir oda', 'Arkadaşlarınla buluşacağın bir yer aç.'],
+    join: ['Sohbete katıl', 'Arkadaşının paylaştığı oda kodunu gir.'],
+  };
   const paths = {
     friends: 'M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2M16 3a4 4 0 0 1 0 8M22 21v-2a4 4 0 0 0-3-3.87M13 7a4 4 0 1 1-8 0 4 4 0 0 1 8 0',
     dm: 'M21 11.5a8.4 8.4 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.4 8.4 0 0 1-3.8-.9L3 21l1.9-5.7a8.4 8.4 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.4 8.4 0 0 1 3.8-.9H13a8.5 8.5 0 0 1 8 8v.5',
@@ -20,6 +29,16 @@
     const panel = document.getElementById(`tab-${id}`);
     panel?.setAttribute('role', 'tabpanel');
     panel?.setAttribute('aria-labelledby', tab.id);
+    if (panel && intros[id]) {
+      const intro = document.createElement('header');
+      intro.className = 'modern-page-intro';
+      const title = document.createElement('h2');
+      const hint = document.createElement('p');
+      title.textContent = intros[id][0];
+      hint.textContent = intros[id][1];
+      intro.append(title, hint);
+      panel.prepend(intro);
+    }
     const selected = tab.classList.contains('active');
     tab.setAttribute('aria-selected', String(selected));
     tab.tabIndex = selected ? 0 : -1;
@@ -87,7 +106,10 @@
         if (!record || (node.data !== record.original && node.data !== record.formatted)) {
           const original = node.data;
           const clean = original.replace(/^\s*\/\/\s*/, '').replace(/^\s*\[\s*/, '').replace(/\s*\]\s*$/, '');
-          record = { original, formatted: labels[clean.trim()] || clean };
+          const trimmed = clean.trim();
+          const readable = trimmed && !/[a-zçğıöşü]/.test(trimmed)
+            ? trimmed[0].toLocaleUpperCase('tr-TR') + trimmed.slice(1).toLocaleLowerCase('tr-TR') : clean;
+          record = { original, formatted: labels[trimmed] || readable };
           originalText.set(node, record);
         }
         const next = modern ? record.formatted : record.original;

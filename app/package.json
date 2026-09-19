@@ -7,7 +7,8 @@
     "start": "electron .",
     "dist": "electron-builder --win --x64 --publish never",
     "release:draft": "electron-builder --win --x64 --publish always",
-    "test:updater": "node --test test/updater.test.js"
+    "test:updater": "node --test test/updater.test.js",
+    "test:ui": "node test/ui-preview.cjs"
   },
   "dependencies": {
     "electron-updater": "^6.6.2"
