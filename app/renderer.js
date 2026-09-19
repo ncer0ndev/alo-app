@@ -1827,9 +1827,9 @@ function scrollDmToBottom() {
   dmScrollBtn.classList.add('hidden');
 }
 
-function dmMessageDeleteLabel(m) {
+function canDeleteDmMessageForEveryone(m) {
   const withinWindow = Date.now() - m.ts <= MESSAGE_DELETE_FOR_EVERYONE_WINDOW_MS;
-  return m.own && withinWindow ? '[ SİL ]' : '[ BENDEN SİL ]';
+  return m.own && withinWindow;
 }
 
 function renderDmLog() {
@@ -1874,11 +1874,12 @@ function renderDmLog() {
       body.appendChild(retryBtn);
       div.append(avatar, body);
     } else if (!m.pending) {
-      const delBtn = document.createElement('button');
-      delBtn.className = 'btn btn-ghost retry-btn';
-      delBtn.textContent = dmMessageDeleteLabel(m);
-      delBtn.onclick = () => deleteDmMessage(m.id);
-      div.append(avatar, body, delBtn);
+      const menu = createMessageActionsMenu({
+        canDeleteEveryone: canDeleteDmMessageForEveryone(m),
+        onDeleteMe: () => deleteDmMessage(m.id, 'me'),
+        onDeleteEveryone: () => deleteDmMessage(m.id, 'everyone'),
+      });
+      div.append(avatar, body, menu);
     } else {
       div.append(avatar, body);
     }
@@ -2006,8 +2007,8 @@ function sendDmMessage() {
   sendDmWithRetry(localMsg);
 }
 
-async function deleteDmMessage(messageId) {
-  const ack = await emitWithTimeout('delete-dm-message', { messageId });
+async function deleteDmMessage(messageId, mode) {
+  const ack = await emitWithTimeout('delete-dm-message', { messageId, mode });
   if (!ack || ack.error) {
     showToast(ack?.error || 'mesaj silinemedi', 'error');
     return;
@@ -3215,11 +3216,54 @@ async function openServerAndTextChannel(serverId, channelId) {
 
 const MESSAGE_DELETE_FOR_EVERYONE_WINDOW_MS = 5 * 60 * 1000;
 
-function textMessageDeleteLabel(m) {
+function canDeleteTextMessageForEveryone(m) {
   const canModerate = activeServerDetail && (activeServerDetail.role === 'owner' || activeServerDetail.role === 'moderator');
   const withinWindow = Date.now() - m.ts <= MESSAGE_DELETE_FOR_EVERYONE_WINDOW_MS;
-  return (m.own || canModerate) && withinWindow ? '[ SİL ]' : '[ BENDEN SİL ]';
+  return (m.own || canModerate) && withinWindow;
 }
+
+function createMessageActionsMenu({ canDeleteEveryone, onDeleteMe, onDeleteEveryone }) {
+  const menu = document.createElement('details');
+  menu.className = 'message-actions-menu';
+  const trigger = document.createElement('summary');
+  trigger.textContent = '•••';
+  trigger.setAttribute('aria-label', 'mesaj işlemleri');
+  const actions = document.createElement('div');
+  actions.className = 'message-actions';
+  const meBtn = document.createElement('button');
+  meBtn.className = 'btn btn-ghost';
+  meBtn.textContent = '[ BENDEN SİL ]';
+  meBtn.onclick = () => {
+    menu.open = false;
+    onDeleteMe();
+  };
+  actions.append(meBtn);
+  if (canDeleteEveryone) {
+    const everyoneBtn = document.createElement('button');
+    everyoneBtn.className = 'btn btn-ghost';
+    everyoneBtn.textContent = '[ HERKESTEN SİL ]';
+    everyoneBtn.onclick = () => {
+      menu.open = false;
+      onDeleteEveryone();
+    };
+    actions.append(everyoneBtn);
+  }
+  menu.append(trigger, actions);
+  menu.addEventListener('toggle', () => {
+    if (menu.open) {
+      document.querySelectorAll('.message-actions-menu[open]').forEach((other) => {
+        if (other !== menu) other.open = false;
+      });
+    }
+  });
+  return menu;
+}
+
+document.addEventListener('click', (event) => {
+  document.querySelectorAll('.message-actions-menu[open]').forEach((menu) => {
+    if (!menu.contains(event.target)) menu.open = false;
+  });
+});
 
 function scrollTextChannelToBottom() {
   textChannelLogEl.scrollTop = textChannelLogEl.scrollHeight;
@@ -3268,11 +3312,12 @@ function renderTextChannelLog({ preserveScroll = false } = {}) {
       };
       div.appendChild(retryBtn);
     } else if (!m.pending) {
-      const delBtn = document.createElement('button');
-      delBtn.className = 'btn btn-ghost retry-btn';
-      delBtn.textContent = textMessageDeleteLabel(m);
-      delBtn.onclick = () => deleteTextChannelMessage(m.id);
-      div.appendChild(delBtn);
+      const menu = createMessageActionsMenu({
+        canDeleteEveryone: canDeleteTextMessageForEveryone(m),
+        onDeleteMe: () => deleteTextChannelMessage(m.id, 'me'),
+        onDeleteEveryone: () => deleteTextChannelMessage(m.id, 'everyone'),
+      });
+      div.appendChild(menu);
     }
 
     textChannelLogEl.appendChild(div);
@@ -3351,8 +3396,8 @@ function sendTextChannelMessage() {
   sendTextChannelMessageWithRetry(localMsg);
 }
 
-async function deleteTextChannelMessage(messageId) {
-  const ack = await emitWithTimeout('delete-server-message', { messageId });
+async function deleteTextChannelMessage(messageId, mode) {
+  const ack = await emitWithTimeout('delete-server-message', { messageId, mode });
   if (!ack || ack.error) {
     showToast(ack?.error || 'mesaj silinemedi', 'error');
     return;

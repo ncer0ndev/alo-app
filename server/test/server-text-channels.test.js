@@ -213,9 +213,12 @@ test('metin kanali: normal uye baskasinin mesajini silemez, kendi mesajini sileb
   assert.equal(ownerMsgAck.ok, true);
   assert.equal(memberMsgAck.ok, true);
 
-  // Sade uye (other), baskasinin (member) mesajini herkesten silemez - yalnizca
-  // kendi gorunumunden gizleyebilir (digerleri icin mesaj hala duruyor).
-  const hideForOther = await emit(other.socket, 'delete-server-message', { messageId: memberMsgAck.message.id });
+  // Sade uye (other), baskasinin (member) mesajini herkesten silmeyi denerse
+  // reddedilir; yalnizca kendi gorunumunden gizleyebilir (digerleri icin
+  // mesaj hala duruyor).
+  const forbiddenEveryone = await emit(other.socket, 'delete-server-message', { messageId: memberMsgAck.message.id, mode: 'everyone' });
+  assert.ok(forbiddenEveryone.error, 'sade uye baskasinin mesajini herkesten silmeyi deneyince reddedilmeli');
+  const hideForOther = await emit(other.socket, 'delete-server-message', { messageId: memberMsgAck.message.id, mode: 'me' });
   assert.equal(hideForOther.ok, true);
   assert.equal(hideForOther.mode, 'me');
   const stillVisibleForMember = await db.getServerMessages(channel.id, member.userId, { limit: 10 });
@@ -223,9 +226,9 @@ test('metin kanali: normal uye baskasinin mesajini silemez, kendi mesajini sileb
   const hiddenForOther = await db.getServerMessages(channel.id, other.userId, { limit: 10 });
   assert.ok(!hiddenForOther.some((m) => m.id === memberMsgAck.message.id), 'other icin artik gorunmemeli');
 
-  // Uye kendi mesajini silebilir.
+  // Uye kendi mesajini herkesten silebilir.
   const memberDeletesOwn = event(owner.socket, 'server-message-deleted');
-  const ownDelete = await emit(member.socket, 'delete-server-message', { messageId: memberMsgAck.message.id });
+  const ownDelete = await emit(member.socket, 'delete-server-message', { messageId: memberMsgAck.message.id, mode: 'everyone' });
   assert.equal(ownDelete.ok, true);
   const deletedEvent = await memberDeletesOwn;
   assert.equal(deletedEvent.messageId, memberMsgAck.message.id);
@@ -237,22 +240,25 @@ test('metin kanali: normal uye baskasinin mesajini silemez, kendi mesajini sileb
     headers: jsonAuth(owner.token),
     body: JSON.stringify({ role: 'moderator' }),
   });
-  const modDelete = await emit(other.socket, 'delete-server-message', { messageId: ownerMsgAck.message.id });
+  const modDelete = await emit(other.socket, 'delete-server-message', { messageId: ownerMsgAck.message.id, mode: 'everyone' });
   assert.equal(modDelete.ok, true, 'moderator baskasinin mesajini silebilmeli');
 
   const remaining = await db.getServerMessages(channel.id, owner.userId, { limit: 10 });
   assert.equal(remaining.length, 0);
 
-  // Moderator de 5 dakikayi gecmis bir mesaji artik herkesten silemez, yalnizca kendinden gizler.
+  // Moderator de 5 dakikayi gecmis bir mesaji herkesten silmeyi denerse reddedilir,
+  // yalnizca kendinden gizleyebilir.
   const oldMsgAck = await emit(member.socket, 'send-server-message', { channelId: channel.id, text: 'eski mesaj moderator', clientMessageId: randomUUID() });
   assert.equal(oldMsgAck.ok, true);
   await adapter.query({
     sql: 'UPDATE server_messages SET created_at = ? WHERE id = ?',
     args: [Date.now() - 6 * 60 * 1000, oldMsgAck.message.id],
   });
-  const modLateDelete = await emit(other.socket, 'delete-server-message', { messageId: oldMsgAck.message.id });
+  const modLateEveryone = await emit(other.socket, 'delete-server-message', { messageId: oldMsgAck.message.id, mode: 'everyone' });
+  assert.ok(modLateEveryone.error, 'moderator de 5 dakikayi gecmis baskasinin mesajini herkesten silmeyi deneyince reddedilmeli');
+  const modLateDelete = await emit(other.socket, 'delete-server-message', { messageId: oldMsgAck.message.id, mode: 'me' });
   assert.equal(modLateDelete.ok, true);
-  assert.equal(modLateDelete.mode, 'me', 'moderator de 5 dakikayi gecmis baskasinin mesajini artik herkesten silememeli');
+  assert.equal(modLateDelete.mode, 'me');
   const stillThereForMember = await db.getServerMessages(channel.id, member.userId, { limit: 10 });
   assert.ok(stillThereForMember.some((m) => m.id === oldMsgAck.message.id), 'mesaj sahibi icin hala durmali');
   const hiddenForModerator = await db.getServerMessages(channel.id, other.userId, { limit: 10 });
@@ -278,9 +284,11 @@ test('metin kanali: 5 dakika sonra kendi mesajini artik herkesten silemez, yalni
     args: [Date.now() - 6 * 60 * 1000, msgAck.message.id],
   });
 
-  const lateDelete = await emit(member.socket, 'delete-server-message', { messageId: msgAck.message.id });
+  const lateEveryone = await emit(member.socket, 'delete-server-message', { messageId: msgAck.message.id, mode: 'everyone' });
+  assert.ok(lateEveryone.error, '5 dakikayi gecmis kendi mesajini herkesten silmeyi deneyince reddedilmeli');
+  const lateDelete = await emit(member.socket, 'delete-server-message', { messageId: msgAck.message.id, mode: 'me' });
   assert.equal(lateDelete.ok, true);
-  assert.equal(lateDelete.mode, 'me', '5 dakikayi gecmis kendi mesaji artik herkesten silinemez');
+  assert.equal(lateDelete.mode, 'me');
 
   const stillThereForOwner = await db.getServerMessages(channel.id, owner.userId, { limit: 10 });
   assert.ok(stillThereForOwner.some((m) => m.id === msgAck.message.id), 'mesaj digerleri icin hala durmali');

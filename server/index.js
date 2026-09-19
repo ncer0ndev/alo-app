@@ -1945,10 +1945,11 @@ io.on('connection', (socket) => {
 
   socket.on('delete-server-message', (payload, ack) => {
     if (typeof ack !== 'function') ack = () => {};
-    const { messageId } = payload || {};
+    const { messageId, mode } = payload || {};
     if (typeof messageId !== 'string' || messageId.length === 0 || messageId.length > 64) {
       return ack({ error: 'gecersiz istek' });
     }
+    if (mode !== 'everyone' && mode !== 'me') return ack({ error: 'gecersiz istek' });
 
     (async () => {
       const message = await db.getServerMessageById(messageId);
@@ -1959,8 +1960,10 @@ io.on('connection', (socket) => {
       const isOwnMessage = Number(message.from_user_id) === userId;
       const canModerate = member.role === 'owner' || member.role === 'moderator';
       const withinWindow = Date.now() - Number(message.created_at) <= MESSAGE_DELETE_FOR_EVERYONE_WINDOW_MS;
+      const canDeleteEveryone = (isOwnMessage || canModerate) && withinWindow;
 
-      if ((isOwnMessage || canModerate) && withinWindow) {
+      if (mode === 'everyone') {
+        if (!canDeleteEveryone) return ack({ error: 'bu mesaj artik herkesten silinemez' });
         await db.deleteServerMessage(messageId);
         await db.addServerAuditLog(message.server_id, userId, isOwnMessage ? 'own_message_deleted' : 'message_moderated', message.username, messageId);
         ack({ ok: true, mode: 'everyone' });
@@ -2150,10 +2153,11 @@ io.on('connection', (socket) => {
 
   socket.on('delete-dm-message', (payload, ack) => {
     if (typeof ack !== 'function') ack = () => {};
-    const { messageId } = payload || {};
+    const { messageId, mode } = payload || {};
     if (typeof messageId !== 'string' || messageId.length === 0 || messageId.length > 64) {
       return ack({ error: 'gecersiz istek' });
     }
+    if (mode !== 'everyone' && mode !== 'me') return ack({ error: 'gecersiz istek' });
 
     (async () => {
       const message = await db.getDirectMessageById(messageId);
@@ -2164,8 +2168,10 @@ io.on('connection', (socket) => {
 
       const isOwnMessage = userId === fromId;
       const withinWindow = Date.now() - Number(message.created_at) <= MESSAGE_DELETE_FOR_EVERYONE_WINDOW_MS;
+      const canDeleteEveryone = isOwnMessage && withinWindow;
 
-      if (isOwnMessage && withinWindow) {
+      if (mode === 'everyone') {
+        if (!canDeleteEveryone) return ack({ error: 'bu mesaj artik herkesten silinemez' });
         await db.deleteDirectMessage(messageId);
         ack({ ok: true, mode: 'everyone' });
         const other = await db.getUserById(toId);

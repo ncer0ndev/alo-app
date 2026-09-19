@@ -144,7 +144,7 @@ test('dm: 5 dakika icinde herkesten silinebilir, sonrasinda yalnizca kendinden g
   const freshAck = await emit(carol.socket, 'dm-message', { toUsername: dave.username, text: 'taze mesaj', clientMessageId: randomUUID() });
   assert.equal(freshAck.ok, true);
   const daveNotified = event(dave.socket, 'dm-message-deleted');
-  const freshDelete = await emit(carol.socket, 'delete-dm-message', { messageId: freshAck.message.id });
+  const freshDelete = await emit(carol.socket, 'delete-dm-message', { messageId: freshAck.message.id, mode: 'everyone' });
   assert.equal(freshDelete.ok, true);
   assert.equal(freshDelete.mode, 'everyone');
   const notice = await daveNotified;
@@ -152,10 +152,12 @@ test('dm: 5 dakika icinde herkesten silinebilir, sonrasinda yalnizca kendinden g
   const goneForBoth = await db.getDirectMessages(dave.userId, carol.userId, { limit: 10 });
   assert.ok(!goneForBoth.some((m) => m.id === freshAck.message.id));
 
-  // Eski mesaj (5 dakikayi gecmis): gonderen artik herkesten silemez, yalnizca kendinden gizler.
+  // Eski mesaj (5 dakikayi gecmis): gonderen herkesten silmeyi denerse reddedilir, yalnizca kendinden gizleyebilir.
   const oldAck = await emit(carol.socket, 'dm-message', { toUsername: dave.username, text: 'eski mesaj', clientMessageId: randomUUID() });
   await adapter.query({ sql: 'UPDATE direct_messages SET created_at = ? WHERE id = ?', args: [Date.now() - 6 * 60 * 1000, oldAck.message.id] });
-  const lateDelete = await emit(carol.socket, 'delete-dm-message', { messageId: oldAck.message.id });
+  const lateEveryone = await emit(carol.socket, 'delete-dm-message', { messageId: oldAck.message.id, mode: 'everyone' });
+  assert.ok(lateEveryone.error, '5 dakikayi gecmis mesaji herkesten silmeyi deneyince reddedilmeli');
+  const lateDelete = await emit(carol.socket, 'delete-dm-message', { messageId: oldAck.message.id, mode: 'me' });
   assert.equal(lateDelete.ok, true);
   assert.equal(lateDelete.mode, 'me');
   const stillThereForDave = await db.getDirectMessages(dave.userId, carol.userId, { limit: 10 });
@@ -163,11 +165,13 @@ test('dm: 5 dakika icinde herkesten silinebilir, sonrasinda yalnizca kendinden g
   const hiddenForCarol = await db.getDirectMessages(carol.userId, dave.userId, { limit: 10 });
   assert.ok(!hiddenForCarol.some((m) => m.id === oldAck.message.id), 'gonderenin kendi gorunumunden gizlenmis olmali');
 
-  // Alici, taze bir mesaji bile herkesten silemez - yalnizca kendinden gizleyebilir.
+  // Alici, taze bir mesaji herkesten silmeyi denerse reddedilir - yalnizca kendinden gizleyebilir.
   const forRecipient = await emit(carol.socket, 'dm-message', { toUsername: dave.username, text: 'aliciya', clientMessageId: randomUUID() });
-  const recipientDelete = await emit(dave.socket, 'delete-dm-message', { messageId: forRecipient.message.id });
+  const recipientEveryone = await emit(dave.socket, 'delete-dm-message', { messageId: forRecipient.message.id, mode: 'everyone' });
+  assert.ok(recipientEveryone.error, 'alici mesaji herkesten silmeyi deneyince reddedilmeli');
+  const recipientDelete = await emit(dave.socket, 'delete-dm-message', { messageId: forRecipient.message.id, mode: 'me' });
   assert.equal(recipientDelete.ok, true);
-  assert.equal(recipientDelete.mode, 'me', 'alici mesaji herkesten silememeli');
+  assert.equal(recipientDelete.mode, 'me');
   const stillThereForCarol = await db.getDirectMessages(carol.userId, dave.userId, { limit: 10 });
   assert.ok(stillThereForCarol.some((m) => m.id === forRecipient.message.id), 'gonderen icin hala durmali');
 
@@ -177,6 +181,6 @@ test('dm: 5 dakika icinde herkesten silinebilir, sonrasinda yalnizca kendinden g
   const outsiderSocket = connect(base, { auth: { token: outsiderToken }, reconnection: false, forceNew: true });
   sockets.push(outsiderSocket);
   await event(outsiderSocket, 'authenticated');
-  const outsiderDelete = await emit(outsiderSocket, 'delete-dm-message', { messageId: forRecipient.message.id });
+  const outsiderDelete = await emit(outsiderSocket, 'delete-dm-message', { messageId: forRecipient.message.id, mode: 'me' });
   assert.ok(outsiderDelete.error, 'ilgisiz kullanici DM silemez');
 });

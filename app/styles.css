@@ -1321,6 +1321,58 @@ textarea:focus-visible,
   display: none;
 }
 
+.message-actions-menu {
+  position: relative;
+  flex: 0 0 auto;
+  margin-left: auto;
+}
+
+.message-actions-menu summary {
+  cursor: pointer;
+  width: 22px;
+  height: 22px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 6px;
+  list-style: none;
+  font-size: 13px;
+  line-height: 1;
+  color: var(--dim);
+}
+
+.message-actions-menu summary::-webkit-details-marker {
+  display: none;
+}
+
+.message-actions-menu summary:hover,
+.message-actions-menu[open] summary {
+  background: color-mix(in srgb, var(--fg) 10%, transparent);
+}
+
+.message-actions-menu .message-actions {
+  position: absolute;
+  right: 0;
+  top: 100%;
+  z-index: 5;
+  margin-top: 4px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 6px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  min-width: 150px;
+}
+
+.message-actions-menu .message-actions .btn {
+  width: 100%;
+  text-align: left;
+  font-size: 11px;
+  padding: 5px 8px;
+}
+
 .chat-scroll-btn {
   width: 100%;
   margin-bottom: 8px;
