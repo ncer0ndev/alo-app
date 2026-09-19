@@ -5,6 +5,8 @@
 // calistirir - her acilista semayi yeniden kontrol eden eski createSchema()
 // yerine gecti.
 
+require('dotenv').config();
+
 const fs = require('fs');
 const path = require('path');
 const adapter = require('./db-adapter');
