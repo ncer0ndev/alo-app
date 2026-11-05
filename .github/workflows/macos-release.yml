@@ -6,7 +6,6 @@ on:
       version:
         description: 'Yayın sürümü (örnek: 1.10.3)'
         required: true
-        default: '1.10.3'
         type: string
 
 permissions:
@@ -37,11 +36,21 @@ jobs:
           fi
           npm version "$RELEASE_VERSION" --no-git-tag-version
       - run: node --test test/updater.test.js
-      - name: Build universal macOS app and publish release
-        run: npm run release:mac
+      - name: Build universal macOS app
+        run: npm run dist:mac
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+      - name: Create or update GitHub release
+        shell: bash
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+          RELEASE_VERSION: ${{ inputs.version }}
+        run: |
+          tag="v$RELEASE_VERSION"
+          if ! gh release view "$tag" >/dev/null 2>&1; then
+            gh release create "$tag" --target "$GITHUB_SHA" --title "ALO $tag" --generate-notes
+          fi
+          gh release upload "$tag" dist/*.dmg dist/*.zip dist/latest-mac.yml --clobber
       - uses: actions/upload-artifact@v4
         with:
           name: macos-universal-installer
