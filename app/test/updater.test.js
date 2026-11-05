@@ -3,7 +3,7 @@ const assert = require('node:assert/strict');
 const { EventEmitter } = require('node:events');
 const { setupUpdater } = require('../updater');
 
-function fixture(packaged = true) {
+function fixture(packaged = true, platform = process.platform) {
   const app = Object.assign(new EventEmitter(), { isPackaged: packaged, getVersion: () => '1.0.0' });
   const updater = new EventEmitter();
   let checks = 0;
@@ -15,7 +15,7 @@ function fixture(packaged = true) {
   const controller = setupUpdater({ app, autoUpdater: updater,
     dialog: { showMessageBox: async (options) => { messages.push(options); return { response }; } },
     Menu: { buildFromTemplate: x => x, setApplicationMenu() {} }, getWindow: () => null,
-    timers: { setTimeout: () => ({}), setInterval: () => ({}), clearTimeout() {}, clearInterval() {} },
+    timers: { setTimeout: () => ({}), setInterval: () => ({}), clearTimeout() {}, clearInterval() {} }, platform,
   });
   return { app, updater, controller, messages, checks: () => checks, installs: () => installs, choose: x => { response = x; } };
 }
@@ -37,12 +37,12 @@ test('download never installs without explicit restart choice', async () => {
   assert.equal(f.messages[0].defaultId, 0);
   f.choose(1);
   await f.controller.check(true);
-  assert.equal(f.installs(), process.platform === 'win32' ? 1 : 0);
+  assert.equal(f.installs(), process.platform === 'win32' || process.platform === 'darwin' ? 1 : 0);
   f.controller.dispose();
 });
 
 test('concurrent checks do not start duplicate downloads', async () => {
-  if (process.platform !== 'win32') return;
+  if (process.platform !== 'win32' && process.platform !== 'darwin') return;
   const f = fixture();
   let release;
   let requests = 0;
@@ -56,7 +56,7 @@ test('concurrent checks do not start duplicate downloads', async () => {
 });
 
 test('network errors are quiet in background and retryable', async () => {
-  if (process.platform !== 'win32') return;
+  if (process.platform !== 'win32' && process.platform !== 'darwin') return;
   const f = fixture();
   f.updater.checkForUpdates = async () => { throw new Error('offline'); };
   await f.controller.check();
@@ -70,4 +70,11 @@ test('quit disposes updater listeners', () => {
   const f = fixture();
   f.app.emit('will-quit');
   assert.equal(f.updater.listenerCount('update-downloaded'), 0);
+});
+
+test('packaged macOS builds check for updates', async () => {
+  const f = fixture(true, 'darwin');
+  await f.controller.check(true);
+  assert.equal(f.checks(), 1);
+  f.controller.dispose();
 });

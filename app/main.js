@@ -15,7 +15,7 @@ if (!gotSingleInstanceLock) {
 }
 
 function runApp() {
-  const ICON_PATH = path.join(__dirname, 'assets', 'icon.ico');
+  const ICON_PATH = path.join(__dirname, 'assets', process.platform === 'win32' ? 'icon.ico' : 'icon-mac.png');
   const TRAY_ICON_PATH = path.join(__dirname, 'assets', 'tray-icon.png');
   const CHAT_NOTIFY_DEBOUNCE_MS = 1500;
 

@@ -1,6 +1,6 @@
-# Windows otomatik güncellemeleri
+# Windows ve macOS otomatik güncellemeleri
 
-Uygulama kurulu Windows sürümünde açılıştan 15 saniye sonra ve her 4 saatte
+Uygulama kurulu Windows veya macOS sürümünde açılıştan 15 saniye sonra ve her 4 saatte
 GitHub Releases üzerinde yeni kararlı sürüm arar. Güncelleme arka planda
 indirilir. Kullanıcı açıkça yeniden başlatmayı seçmeden kurulum yapılmaz;
 normal çıkışta da otomatik kurulum kapalıdır. Üstteki **Uygulama** menüsünden
@@ -19,23 +19,26 @@ ilk dağıtımdan önce değiştirin. Depo görünürlüğü bu çalışma sıra
 
 ## Yeni sürüm hazırlama
 
-1. `app` klasöründe `npm version patch --no-git-tag-version` ile sürümü artırın.
-   Paket dosyası ve kilit dosyasını birlikte kaydedin. Her sürüm daha yüksek
-   olmalıdır; aynı sürüm numarası kurulu istemcileri güncellemez.
-2. Testleri çalıştırın ve değişiklikleri GitHub'a gönderin.
-3. GitHub Actions → **Build Windows update (draft)** iş akışını elle çalıştırın.
-   NSIS kurulum dosyası, `.blockmap` ve `latest.yml` taslak sürüme yüklenir.
-4. Taslağı inceleyin. Kurulumu test edip sürüm notlarını ekledikten sonra GitHub
-   üzerinden sürümü yayınlayın. Taslaklar kullanıcıya güncelleme olarak sunulmaz.
+1. Testleri çalıştırın ve değişiklikleri GitHub'a gönderin.
+2. GitHub Actions'ta **Publish Windows release** veya
+   **Publish macOS release (unsigned)** iş akışını açın.
+3. Daha önce kullanılmamış, kurulu sürümden yüksek bir sürüm numarası girin.
+   Workflow bu numarayı paket içine yazar; aynı sürüm numarası kurulu
+   istemcileri güncellemez.
+4. Windows akışı NSIS kurulum dosyası, `.blockmap` ve `latest.yml`; macOS akışı
+   Universal `.dmg`, `.zip` ve `latest-mac.yml` üretip yayınlanmış GitHub
+   Release'e yükler.
 
-Alternatif yerel paketleme: `npm ci` ardından `npm run dist`.
-Bu komut yayın yapmaz. İmzalı dağıtım için electron-builder kod imzalama
-sertifikası/CI sırları ayrıca yapılandırılmalıdır; sertifika veya token
-uygulama dosyalarına eklenmemelidir. İmzasız kurulumlarda Windows uyarabilir.
+Alternatif yerel paketleme: Windows için `npm ci` ardından `npm run dist`,
+macOS için macOS üzerinde `npm run dist:mac`. Bu komutlar yayın yapmaz.
+İmzalı dağıtım için kod imzalama sertifikası/CI sırları ayrıca
+yapılandırılmalıdır; sertifika veya token uygulama dosyalarına eklenmemelidir.
+İmzasız kurulumlarda Windows uyarabilir; imzasız macOS paketi ilk kez açılırken
+Finder'da uygulamaya sağ tıklayıp **Aç** seçilmelidir.
 
 ## Gerçek güncelleme testi
 
-- İki farklı sürüm ve temiz bir Windows test ortamı kullanın.
+- İki farklı sürüm ve temiz bir Windows veya macOS test ortamı kullanın.
 - Önce düşük sürümü kurun; yüksek sürümün yayınlanmış dosyaları ve `latest.yml`
   erişilebilir olduğunda menüden kontrol edin.
 - “Daha sonra” seçildiğinde uygulamanın ve görüşmenin açık kaldığını doğrulayın.

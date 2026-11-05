@@ -90,6 +90,27 @@ npm install
 npm start
 ```
 
+## macOS sürümü
+
+GitHub Actions içindeki **Publish macOS release (unsigned)** iş akışı,
+Apple Silicon ve Intel Mac'lerde çalışan tek bir Universal uygulama üretir.
+İş akışını çalıştırırken daha önce kullanılmamış bir sürüm numarası girin.
+Çıktılar GitHub Releases bölümüne `.dmg`, `.zip` ve `latest-mac.yml` olarak
+yüklenir.
+
+Apple Developer hesabı kullanılmadığı için uygulama imzasızdır. İlk açılışta
+Finder'da ALO'ya sağ tıklayıp **Aç** seçeneğini kullanın ve macOS onayını verin.
+Mikrofon izni istendiğinde izin verin. Apple Silicon ve Intel için ayrı dosya
+seçmeye gerek yoktur; `universal` paket ikisini de içerir.
+
+Yerel olarak yalnızca macOS üzerinde paketlemek için:
+
+```bash
+cd app
+npm ci
+npm run dist:mac
+```
+
 ## Testler
 
 ```bash

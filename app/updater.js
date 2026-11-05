@@ -1,12 +1,12 @@
 // Main-process only: no release credentials or updater IPC exposed to the renderer.
-function setupUpdater({ app, autoUpdater, dialog, Menu, getWindow, timers = globalThis }) {
+function setupUpdater({ app, autoUpdater, dialog, Menu, getWindow, timers = globalThis, platform = process.platform }) {
   let busy = false;
   let downloaded = false;
   let promptOpen = false;
   let disposed = false;
   let startupTimer;
   let interval;
-  const supported = app.isPackaged && process.platform === 'win32';
+  const supported = app.isPackaged && (platform === 'win32' || platform === 'darwin');
 
   autoUpdater.autoDownload = true;
   autoUpdater.autoInstallOnAppQuit = false;
@@ -45,7 +45,7 @@ function setupUpdater({ app, autoUpdater, dialog, Menu, getWindow, timers = glob
   async function check(manual = false) {
     if (disposed) return;
     if (!supported) {
-      if (manual) await message({ type: 'info', message: 'Güncellemeler kurulu Windows sürümünde kullanılabilir.' });
+      if (manual) await message({ type: 'info', message: 'Güncellemeler kurulu Windows veya macOS sürümünde kullanılabilir.' });
       return;
     }
     if (downloaded) return manual ? offerInstall() : undefined;

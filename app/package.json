@@ -7,6 +7,8 @@
     "start": "electron .",
     "dist": "electron-builder --win --x64 --publish never",
     "release": "electron-builder --win --x64 --publish always",
+    "dist:mac": "electron-builder --mac --universal --publish never",
+    "release:mac": "electron-builder --mac --universal --publish always",
     "test:updater": "node --test test/updater.test.js",
     "test:ui": "node test/ui-preview.cjs"
   },
@@ -38,6 +40,20 @@
     "win": {
       "target": "nsis",
       "icon": "assets/icon.ico"
+    },
+    "mac": {
+      "target": [
+        "dmg",
+        "zip"
+      ],
+      "icon": "assets/icon-mac.png",
+      "category": "public.app-category.social-networking",
+      "identity": null,
+      "minimumSystemVersion": "11.0",
+      "artifactName": "${productName}-${version}-mac-${arch}.${ext}",
+      "extendInfo": {
+        "NSMicrophoneUsageDescription": "ALO, sesli görüşmelere katılabilmen için mikrofon erişimine ihtiyaç duyar."
+      }
     },
     "nsis": {
       "oneClick": false,

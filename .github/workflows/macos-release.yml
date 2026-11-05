@@ -1,0 +1,52 @@
+name: Publish macOS release (unsigned)
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Yayın sürümü (örnek: 1.10.3)'
+        required: true
+        default: '1.10.3'
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  macos:
+    runs-on: macos-latest
+    defaults:
+      run:
+        working-directory: app
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: app/package-lock.json
+      - run: npm ci
+      - name: Validate and set release version
+        shell: bash
+        env:
+          RELEASE_VERSION: ${{ inputs.version }}
+        run: |
+          if [[ ! "$RELEASE_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]; then
+            echo "Gecersiz surum: $RELEASE_VERSION" >&2
+            exit 1
+          fi
+          npm version "$RELEASE_VERSION" --no-git-tag-version
+      - run: node --test test/updater.test.js
+      - name: Build universal macOS app and publish release
+        run: npm run release:mac
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+      - uses: actions/upload-artifact@v4
+        with:
+          name: macos-universal-installer
+          path: |
+            app/dist/*.dmg
+            app/dist/*.zip
+            app/dist/latest-mac.yml
+          if-no-files-found: error
