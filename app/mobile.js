@@ -15,6 +15,55 @@
   document.addEventListener('keydown', event => { if (event.key === 'Escape') close(); });
   document.querySelector('#community-rail').addEventListener('click', event => { if (event.target.closest('.community-server-item, .dm-rail-item, .rail-home-btn, .group-rail-list button')) close(); });
   mobile.addEventListener('change', close);
+  // A channel/member drawer must not remain over the conversation after selection.
+  const community = document.querySelector('#community-area');
+  document.querySelector('.server-channel-rail')?.addEventListener('click', event => {
+    if (mobile.matches && event.target.closest('button, [role="button"]')) {
+      community.classList.remove('show-channels');
+      document.querySelector('#toggle-channels')?.setAttribute('aria-expanded', 'false');
+    }
+  });
+  for (const [id, other] of [['toggle-channels', 'show-members'], ['toggle-members', 'show-channels']]) {
+    document.getElementById(id)?.addEventListener('click', () => { if (mobile.matches) community.classList.remove(other); });
+  }
+  const resume = document.createElement('button'); resume.type = 'button';
+  resume.className = 'btn mobile-resume-call'; resume.hidden = true;
+  resume.textContent = 'Görüşme sesini devam ettir'; document.body.append(resume);
+  async function resumeMedia() {
+    if (!currentRoomCode) { resume.hidden = true; return; }
+    resume.hidden = false;
+    let blocked = false;
+    try { if (audioContext?.state === 'suspended' || audioContext?.state === 'interrupted') await audioContext.resume(); } catch { blocked = true; }
+    await Promise.all([...document.querySelectorAll('audio, #shared-screen')].filter(element => element.srcObject).map(async element => { try { await element.play(); } catch { blocked = true; } }));
+    const interrupted = localStream?.getAudioTracks().some(track => track.muted || track.readyState === 'ended');
+    resume.hidden = !blocked && !interrupted;
+    if (interrupted) resume.textContent = 'Mikrofon duraklatıldı · Gerekirse kanala yeniden katıl';
+    else resume.textContent = 'Görüşme sesini devam ettir';
+  }
+  resume.onclick = resumeMedia;
+  document.addEventListener('visibilitychange', () => { if (!document.hidden) void resumeMedia(); });
+  window.addEventListener('pageshow', () => { void resumeMedia(); });
+  // A screen wake lock only prevents locking while the page is visible;
+  // it cannot grant background execution privileges on iOS.
+  let wakeLock = null, requestingWakeLock = false;
+  async function updateWakeLock() {
+    if (!currentRoomCode || document.hidden) {
+      if (wakeLock) { const lock = wakeLock; wakeLock = null; await lock.release().catch(() => {}); }
+      if (!currentRoomCode) resume.hidden = true;
+      return;
+    }
+    if (wakeLock || requestingWakeLock || !navigator.wakeLock) return;
+    requestingWakeLock = true;
+    try {
+      const lock = await navigator.wakeLock.request('screen');
+      wakeLock = lock;
+      lock.addEventListener('release', () => { if (wakeLock === lock) wakeLock = null; });
+      if (!currentRoomCode || document.hidden) { wakeLock = null; await lock.release(); }
+    } catch { /* Unsupported or denied: voice remains usable in the foreground. */ }
+    finally { requestingWakeLock = false; }
+  }
+  document.addEventListener('visibilitychange', () => { void updateWakeLock(); });
+  setInterval(() => { void updateWakeLock(); }, 2000);
   // Electron-specific preferences have no equivalent in the browser.
   for (const id of ['run-in-background-checkbox', 'launch-at-login-checkbox', 'game-detection-checkbox']) {
     const label = document.getElementById(id)?.closest('label');

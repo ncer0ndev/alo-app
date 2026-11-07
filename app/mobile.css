@@ -3,7 +3,26 @@
 .mobile-drawer-backdrop[hidden], .web-client #tab-settings label[hidden], .web-client #tab-settings .hint-text[hidden], .web-client .app-settings[hidden] { display: none !important; }
 .web-client.no-screen-capture #share-screen, .web-client.no-screen-capture .voice-dock [data-action=share], .web-client.no-screen-capture #active-call-bar > button:last-child { display: none; }
 .web-client .mobile-share-note { color: var(--dim); font-size: 12px; line-height: 1.6; }
+.share-expanded-close[hidden], .mobile-resume-call[hidden] { display: none !important; }
+.screen-floating-preview.share-expanded.social-tools { position: fixed; inset: 0; width: 100%; max-width: none; height: 100dvh; max-height: none; box-sizing: border-box; z-index: 4000; background: #090b0e; padding: calc(12px + env(safe-area-inset-top)) 12px calc(12px + env(safe-area-inset-bottom)); display: flex; flex-direction: column; }
+.screen-floating-preview.share-expanded video { width: 100%; flex: 1; min-height: 0; height: 100%; max-height: none; object-fit: contain; background: #000; }
+.share-expanded-close { flex: 0 0 auto; }
+.mobile-resume-call { position: fixed; z-index: 2000; bottom: calc(140px + env(safe-area-inset-bottom)); left: 12px; right: 12px; }
 @media (max-width: 680px) {
+  .web-client .toast { bottom: calc(88px + env(safe-area-inset-bottom)); left: 12px; right: 12px; width: auto; max-width: none; transform: none; box-sizing: border-box; font: 13px/1.5 'Inter', sans-serif; padding: 12px; }
+  .web-client .community-area { position: relative; isolation: isolate; }
+  .web-client .server-channel-rail, .web-client .community-members { width: 100% !important; max-width: none; max-height: none; box-sizing: border-box; overflow-y: auto; padding-bottom: calc(130px + env(safe-area-inset-bottom)); }
+  .web-client .community-view-tools { position: relative; z-index: 20; }
+  .web-client .server-detail-header { flex-wrap: wrap; }
+  .web-client .server-detail-header h2 { min-width: 0; overflow-wrap: anywhere; flex: 1; }
+  .web-client .server-detail-header .btn { flex: 0 0 auto; }
+  .web-client .home-area .tab-bar { flex-basis: auto; }
+  .web-client .masthead-actions { margin-left: auto; flex-shrink: 0; }
+  .web-client .screen-floating-preview video { width: 100%; object-fit: contain; background: #000; }
+  .web-client .screen-floating-preview .btn { min-height: 40px; }
+  .web-client .voice-dock { max-height: 150px; overflow-y: auto; z-index: 1080; }
+  .web-client .chat-message, .web-client .message-body { min-width: 0; overflow-wrap: anywhere; }
+  .web-client dialog { max-width: calc(100vw - 24px); box-sizing: border-box; }
   html.web-client, .web-client body { width: 100%; height: 100%; min-width: 0; overflow: hidden; overscroll-behavior: none; }
   .web-client body { -webkit-text-size-adjust: 100%; }
   .web-client .masthead { padding: env(safe-area-inset-top) 12px 0; height: calc(52px + env(safe-area-inset-top)); gap: 12px; box-sizing: border-box; }
@@ -44,6 +63,7 @@
   .web-client .friend-row .btn { min-width: 0; padding: 8px; }
   .web-client .voice-dock { bottom: calc(76px + env(safe-area-inset-bottom)); left: 8px; width: min(300px, calc(100vw - 16px)); }
   .web-client .screen-floating-preview.social-tools { bottom: calc(182px + env(safe-area-inset-bottom)); right: 8px; width: min(300px, calc(100vw - 16px)); }
+  .web-client .screen-floating-preview.share-expanded.social-tools { inset: 0; width: 100%; max-width: none; max-height: none; }
   .web-client .setup-dialog, .web-client .screen-picker, .web-client .social-guide { max-height: 80dvh; padding: 20px; }
   .web-client #tab-settings label + .hint-text { padding-left: 0; }
   .web-client .offline-screen { top: calc(52px + env(safe-area-inset-top)); }

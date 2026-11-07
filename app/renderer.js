@@ -325,13 +325,17 @@ const seenDmMessageIds = new Set();
 
 function showToast(text, kind = 'info', durationMs = 4000) {
   if (kind === 'error' && window.aloFriendlyError) text = window.aloFriendlyError(text);
-  toastEl.textContent = `[${kind.toUpperCase()}] ${text}`;
+  toastEl.textContent = text;
+  const dismiss = document.createElement('button');
+  dismiss.type = 'button'; dismiss.className = 'toast-dismiss';
+  dismiss.textContent = '×'; dismiss.setAttribute('aria-label', 'Bildirimi kapat');
+  dismiss.onclick = () => { clearTimeout(toastEl._timeout); toastEl.classList.add('hidden'); };
+  toastEl.append(dismiss);
   toastEl.className = `toast ${kind}`;
   toastEl.classList.remove('hidden');
   if (toastEl._timeout) clearTimeout(toastEl._timeout);
-  if (durationMs > 0) {
-    toastEl._timeout = setTimeout(() => toastEl.classList.add('hidden'), durationMs);
-  }
+  const lifetime = Number.isFinite(durationMs) && durationMs > 0 ? durationMs : 5000;
+  toastEl._timeout = setTimeout(() => toastEl.classList.add('hidden'), lifetime);
 }
 
 function setStatus(text, kind = 'info') {
@@ -4206,7 +4210,7 @@ async function rejoinAfterReconnect() {
   cleanupAllPeers();
   const result = await joinRoomAck(roomCode);
   if (!result || result.error) {
-    showToast('odaya yeniden katılınamadı: ' + (result?.error || ''), 'error', 0);
+    showToast('Görüşmeye yeniden bağlanılamadı. Devam etmek için kanala veya odaya tekrar katıl.', 'error', 5000);
     currentRoomCode = null;
     showScreen(joinScreen);
     return;

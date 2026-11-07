@@ -180,7 +180,59 @@
     finally { starting = false; }
   };
   video.onclick = () => video.play().catch(() => {});
-  panel.querySelector('#share-fullscreen').onclick = () => { if (!video.hidden) video.requestFullscreen().catch(() => {}); };
+  const pipButton = document.createElement('button');
+  pipButton.type = 'button'; pipButton.className = 'btn btn-ghost';
+  pipButton.textContent = 'Küçük pencere (PiP)';
+  pipButton.setAttribute('aria-pressed', 'false');
+  panel.querySelector('#share-fullscreen').after(pipButton);
+  function inPip() {
+    return document.pictureInPictureElement === video || video.webkitPresentationMode === 'picture-in-picture';
+  }
+  function syncPip() {
+    const active = inPip();
+    pipButton.textContent = active ? 'PiP’den çık' : 'Küçük pencere (PiP)';
+    pipButton.setAttribute('aria-pressed', String(active));
+    pipButton.disabled = video.hidden || video.readyState < 1;
+  }
+  for (const event of ['enterpictureinpicture', 'leavepictureinpicture', 'webkitpresentationmodechanged', 'loadedmetadata', 'emptied']) video.addEventListener(event, syncPip);
+  pipButton.onclick = async () => {
+    try {
+      if (inPip()) {
+        if (document.pictureInPictureElement === video && document.exitPictureInPicture) await document.exitPictureInPicture();
+        else video.webkitSetPresentationMode('inline');
+      } else {
+        // Invoke directly from the tap: Safari requires an active user gesture.
+        if (video.webkitSupportsPresentationMode?.('picture-in-picture') && typeof video.webkitSetPresentationMode === 'function') {
+          video.webkitSetPresentationMode('picture-in-picture');
+        } else if (document.pictureInPictureEnabled && video.requestPictureInPicture) {
+          await video.requestPictureInPicture();
+        } else {
+          status.textContent = 'Bu cihaz veya bu canlı yayın için PiP desteklenmiyor. Tam ekranı kullanabilirsin.';
+          return;
+        }
+        collapseShare();
+        status.textContent = 'PiP istendi. Küçük pencere açılırsa başka uygulamaya geçerek deneyebilirsin; sesin arka planda sürmesi garanti değildir.';
+      }
+    } catch {
+      status.textContent = 'PiP açılamadı. Yayını oynatıp tekrar dokun; iPhone bu canlı yayın için PiP’ye izin vermiyor olabilir.';
+    } finally { syncPip(); }
+  };
+  const closeExpanded = document.createElement('button');
+  closeExpanded.type = 'button'; closeExpanded.className = 'btn share-expanded-close';
+  closeExpanded.textContent = 'Küçült'; closeExpanded.hidden = true;
+  panel.append(closeExpanded);
+  function collapseShare() { panel.classList.remove('share-expanded'); closeExpanded.hidden = true; }
+  closeExpanded.onclick = collapseShare;
+  document.addEventListener('keydown', event => { if (event.key === 'Escape') collapseShare(); });
+  panel.querySelector('#share-fullscreen').onclick = async () => {
+    if (video.hidden) return;
+    try {
+      if (video.requestFullscreen) { await video.requestFullscreen(); return; }
+      if (video.webkitEnterFullscreen) { video.webkitEnterFullscreen(); return; }
+    } catch { /* Fall back to a viewport-filling player. */ }
+    panel.classList.add('share-expanded'); closeExpanded.hidden = false;
+    video.play().catch(() => {});
+  };
   setInterval(() => {
     const inCommunityCall = !!currentRoomCode && currentRoomType === 'server-channel';
     dock.hidden = !inCommunityCall;
@@ -191,6 +243,8 @@
     const target = document.body;
     if (panel.parentElement !== target) target.append(panel);
     panel.hidden = !currentRoomCode || (!stream && !owner && !starting);
+    if (panel.hidden) collapseShare();
+    syncPip();
     communityShareButton.hidden = !currentRoomCode;
     communityShareButton.textContent = stream ? 'Paylaşımı durdur' : 'Ekran paylaş';
     if (socket !== boundSocket) {
