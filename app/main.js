@@ -25,6 +25,20 @@ function runApp() {
   let updaterCtl = null;
   let backgroundPref = false;
   let isQuitting = false;
+  let screenSources = new Map();
+  let selectedScreen = null;
+  ipcMain.handle('screen-sources', async event => {
+    if (!isTrustedSender(event)) return [];
+    const sources = await desktopCapturer.getSources({ types: ['screen', 'window'], thumbnailSize: { width: 320, height: 180 }, fetchWindowIcons: true });
+    screenSources = new Map(sources.map(source => [source.id, source]));
+    return sources.map(source => ({ id: source.id, name: source.name, thumbnail: source.thumbnail.toDataURL(), type: source.id.startsWith('screen:') ? 'screen' : 'window' }));
+  });
+  ipcMain.handle('screen-select', (event, id) => {
+    if (!isTrustedSender(event) || !screenSources.has(id)) return false;
+    selectedScreen = { source: screenSources.get(id), expires: Date.now() + 30000 };
+    screenSources.clear();
+    return true;
+  });
 
   const callNotifications = new Map(); // roomCode -> Notification
   const chatNotifyState = new Map(); // roomCode -> { timer, count, lastFrom, lastText, showContent }
@@ -218,15 +232,11 @@ function runApp() {
   }
 
   app.whenReady().then(() => {
-    session.defaultSession.setDisplayMediaRequestHandler(async (_request, callback) => {
+    session.defaultSession.setDisplayMediaRequestHandler(async (request, callback) => {
       try {
-        const sources = await desktopCapturer.getSources({ types: ['screen', 'window'] });
-        const result = await dialog.showMessageBox(mainWindow, {
-          title: 'Ekran paylaş', message: 'Paylaşılacak ekranı veya pencereyi seç',
-          buttons: ['Vazgeç', ...sources.map(source => source.name)], cancelId: 0,
-        });
-        const source = sources[result.response - 1];
-        callback(source ? { video: source, ...(process.platform === 'win32' ? { audio: 'loopback' } : {}) } : {});
+        const selection = selectedScreen; selectedScreen = null;
+        if (!selection || selection.expires < Date.now() || request.frame !== mainWindow?.webContents.mainFrame) return callback({});
+        callback({ video: selection.source, ...(request.audioRequested && process.platform === 'win32' ? { audio: 'loopback' } : {}) });
       } catch { callback({}); }
     });
     createWindow();

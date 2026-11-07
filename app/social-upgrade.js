@@ -7,6 +7,51 @@
   const video = panel.querySelector('video');
   const status = panel.querySelector('#share-status');
   const button = panel.querySelector('#share-screen');
+  const quality = document.createElement('select');
+  quality.setAttribute('aria-label', 'Paylaşım kalitesi');
+  quality.innerHTML = '<option value="1080:30">1080p · 30 FPS</option><option value="1080:60">1080p · 60 FPS</option><option value="720:30">720p · 30 FPS (düşük bağlantı)</option>';
+  button.after(quality);
+  const picker = document.createElement('dialog'); picker.className = 'screen-picker';
+  picker.innerHTML = '<header><h2>Ekranını paylaş</h2><button type="button" class="btn btn-ghost" aria-label="Kapat">×</button></header><p>Paylaşmak istediğin ekranı veya pencereyi seç.</p><nav><button type="button" class="btn" data-source-type="screen">Ekranlar</button><button type="button" class="btn btn-ghost" data-source-type="window">Pencereler</button></nav><div class="screen-source-grid"></div><p class="screen-picker-status" role="status"></p>';
+  document.body.append(picker);
+  async function chooseSource() {
+    if (!window.api?.screenSources) return true;
+    picker.showModal();
+    const grid = picker.querySelector('.screen-source-grid'); grid.replaceChildren();
+    const hint = picker.querySelector('.screen-picker-status'); hint.textContent = 'Önizlemeler yükleniyor…';
+    let sources;
+    try { sources = await window.api.screenSources(); } catch { picker.close(); throw new Error('Pencere listesi alınamadı. Ekran kaydı iznini kontrol et.'); }
+    if (!picker.open) return false;
+    hint.textContent = '';
+    return new Promise(resolve => {
+      const close = () => { picker.removeEventListener('close', close); resolve(false); };
+      picker.addEventListener('close', close);
+      const draw = type => {
+        grid.replaceChildren();
+        for (const source of sources.filter(source => source.type === type)) {
+          const item = document.createElement('button'); item.type = 'button'; item.className = 'screen-source';
+          const img = document.createElement('img'); img.src = source.thumbnail; img.alt = '';
+          const name = document.createElement('span'); name.textContent = source.name;
+          item.append(img, name);
+          item.onclick = async () => {
+            item.disabled = true;
+            try {
+              const ok = await window.api.selectScreenSource(source.id);
+              if (!ok) { hint.textContent = 'Kaynak artık mevcut değil. Seçiciyi yeniden aç.'; return; }
+              picker.removeEventListener('close', close); picker.close(); resolve(true);
+            } catch { hint.textContent = 'Kaynak seçilemedi.'; } finally { item.disabled = false; }
+          };
+          grid.append(item);
+        }
+        if (!grid.children.length) hint.textContent = 'Bu kategoride paylaşılabilir kaynak yok.';
+        else hint.textContent = '';
+        picker.querySelectorAll('[data-source-type]').forEach(btn => btn.setAttribute('aria-pressed', String(btn.dataset.sourceType === type)));
+      };
+      picker.querySelectorAll('[data-source-type]').forEach(btn => { btn.onclick = () => draw(btn.dataset.sourceType); });
+      picker.querySelector('header button').onclick = () => picker.close();
+      draw('screen');
+    });
+  }
   const communityShareButton = document.createElement('button');
   communityShareButton.className = 'btn btn-ghost';
   communityShareButton.textContent = 'Ekran paylaş';
@@ -27,6 +72,7 @@
     peers.clear(); candidates.clear(); video.srcObject = null; video.hidden = true;
   }
   function stop(notify = true) {
+    quality.disabled = false;
     if (stream) { const old = stream; stream = null; old.getTracks().forEach(track => track.stop()); }
     clearPeers(); button.textContent = 'Ekran paylaş';
     if (notify && boundSocket?.connected) boundSocket.emit('screen-control', { action: 'stop' }, () => {});
@@ -39,7 +85,15 @@
       if (event.candidate) boundSocket.emit('screen-signal', { to: id, data: { candidate: event.candidate } });
     };
     pc.ontrack = event => { video.srcObject = event.streams[0]; video.muted = false; video.hidden = false; video.play().catch(() => { status.textContent = 'Oynatmak için görüntüye tıkla.'; }); };
-    if (stream) stream.getTracks().forEach(track => pc.addTrack(track, stream));
+    if (stream) stream.getTracks().forEach(track => {
+      const sender = pc.addTrack(track, stream);
+      if (track.kind === 'video') {
+        const parameters = sender.getParameters();
+        parameters.encodings = [{ maxBitrate: quality.value === '1080:60' ? 10000000 : quality.value === '720:30' ? 2500000 : 6000000, maxFramerate: Number(quality.value.split(':')[1]) }];
+        parameters.degradationPreference = 'maintain-resolution';
+        sender.setParameters(parameters).catch(() => {});
+      }
+    });
     return pc;
   }
   async function signal({ from, data }) {
@@ -75,11 +129,15 @@
     if (starting || !socket?.connected || !currentRoomCode) return;
     starting = true;
     try {
-      const captured = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: panel.querySelector('#share-audio').checked });
+      if (!await chooseSource()) return;
+      const [height, fps] = quality.value.split(':').map(Number);
+      const captured = await navigator.mediaDevices.getDisplayMedia({ video: { width: { ideal: Math.round(height * 16 / 9), max: Math.round(height * 16 / 9) }, height: { ideal: height, max: height }, frameRate: { ideal: fps, max: fps } }, audio: panel.querySelector('#share-audio').checked });
+      captured.getVideoTracks()[0].contentHint = fps === 60 ? 'motion' : 'detail';
       stream = captured;
       const result = await new Promise(resolve => socket.timeout(5000).emit('screen-control', { action: 'start' }, (error, result) => resolve(error ? { error: 'Sunucu yanıt vermedi.' } : result)));
       if (result?.error) { captured.getTracks().forEach(track => track.stop()); throw new Error(result.error); }
       stream = captured; video.srcObject = captured; video.muted = true; video.hidden = false;
+      quality.disabled = true;
       captured.getVideoTracks()[0].onended = () => stop();
       button.textContent = 'Paylaşımı durdur'; status.textContent = 'Ekranın paylaşılıyor';
     } catch (error) { stop(); status.textContent = error.message || 'Paylaşım başlatılamadı.'; }
@@ -88,7 +146,7 @@
   video.onclick = () => video.play().catch(() => {});
   panel.querySelector('#share-fullscreen').onclick = () => { if (!video.hidden) video.requestFullscreen().catch(() => {}); };
   setInterval(() => {
-    const target = currentRoomType === 'server-channel' && !document.querySelector('#community-area').classList.contains('hidden')
+    const target = !document.querySelector('#room-screen').classList.contains('hidden') ? document.querySelector('#room-screen .window-body') : currentRoomType === 'server-channel' && !document.querySelector('#community-area').classList.contains('hidden')
       ? document.querySelector('#community-area .community-main') : document.querySelector('#room-screen');
     if (panel.parentElement !== target) target.append(panel);
     panel.hidden = !currentRoomCode;

@@ -444,6 +444,17 @@ function applyUiMode(mode) {
 }
 
 function showScreen(screen) {
+  const communityMain = document.querySelector('#community-area .community-main');
+  const embedded = screen === roomScreen && currentRoomType === 'server-channel' && activeServerDetail?.id === currentChannelServerId;
+  communityMain.classList.toggle('voice-stage-open', embedded);
+  roomScreen.classList.toggle('embedded-voice', embedded);
+  if (embedded) {
+    communityMain.append(roomScreen);
+    authScreen.classList.add('hidden'); joinScreen.classList.remove('hidden');
+    enterCommunityMode(); roomScreen.classList.remove('hidden');
+    updateActiveCallBar(); return;
+  }
+  if (roomScreen.parentElement === communityMain) document.querySelector('main').append(roomScreen);
   [authScreen, joinScreen, roomScreen].forEach((s) => s.classList.add('hidden'));
   screen.classList.remove('hidden');
   updateActiveCallBar();
@@ -2209,6 +2220,8 @@ async function joinServerByCode() {
 // .collapsed sinifiyla gorunumu degistirir.
 
 function enterHomeMode() {
+  document.querySelector('#community-area .community-main').classList.remove('voice-stage-open');
+  if (roomScreen.classList.contains('embedded-voice')) roomScreen.classList.add('hidden');
   activeServerDetail = null;
   channelEditMode = false;
   hideMemberHoverCard();
@@ -3276,11 +3289,10 @@ async function performJoinServerVoiceChannel(serverId, channelId, channelName) {
 
   updateDirectCallUI('server-channel', channelName);
   roomAccessSection.classList.add('hidden');
-  // Ekran degismez: kanal barinin altinda kendi profilin gorunur (ses
-  // kanali listesi 'server-channel-count' ile zaten kendini de icerir),
-  // tam oda ekranina "ODAYA DÖN" ile istege bagli gecilir.
+  // Keep the voice stage inside its community instead of a separate screen.
   updateActiveCallBar();
   if (activeServerDetail && activeServerDetail.id === serverId) renderServerDetail();
+  showScreen(roomScreen);
   renderParticipants();
   applyChatHistory(ack.chatHistory);
   applyMicMode();
@@ -3403,6 +3415,8 @@ async function loadTextChannelMessages({ older = false } = {}) {
 }
 
 async function openTextChannel(serverId, channelId, channelName) {
+  document.querySelector('#community-area .community-main').classList.remove('voice-stage-open');
+  if (roomScreen.classList.contains('embedded-voice')) roomScreen.classList.add('hidden');
   currentTextChannel = { serverId, channelId, name: channelName };
   textChannelMessages = [];
   seenServerMessageIds.clear();
@@ -4566,7 +4580,10 @@ roomSettingsBtn.addEventListener('click', () => {
   showTab('settings');
 });
 
-returnToCallBtn.addEventListener('click', () => {
+returnToCallBtn.addEventListener('click', async () => {
+  if (currentRoomType === 'server-channel' && currentChannelServerId && activeServerDetail?.id !== currentChannelServerId) {
+    showScreen(joinScreen); await openServerDetail(currentChannelServerId);
+  }
   showScreen(roomScreen);
 });
 

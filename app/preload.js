@@ -11,6 +11,8 @@ const PTT_KEYS = [
 ];
 
 contextBridge.exposeInMainWorld('api', {
+  screenSources: () => ipcRenderer.invoke('screen-sources'),
+  selectScreenSource: id => typeof id === 'string' ? ipcRenderer.invoke('screen-select', id) : Promise.resolve(false),
   pttKeyOptions: PTT_KEYS,
 
   copyToClipboard: (text) => {
