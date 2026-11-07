@@ -16,5 +16,5 @@
   }
 
   document.documentElement.setAttribute('data-theme', theme);
-  document.documentElement.setAttribute('data-ui', uiMode);
+  document.documentElement.setAttribute('data-ui', 'modern');
 })();

@@ -39,7 +39,7 @@ document.getElementById('run').onclick = async () => {
       check(d.documentElement.dataset.theme === theme && d.documentElement.dataset.ui === 'modern', `${width}: bağımsız ${theme} teması`);
     }
     toggle.click(); await wait();
-    check(d.documentElement.dataset.ui === 'classic' && d.querySelector('[data-tab="friends"]').textContent.includes('['), `${width}: klasik etiketler geri geliyor`);
+    check(d.documentElement.dataset.ui === 'modern' && toggle.disabled, `${width}: yalnızca modern arayüz etkin`);
     toggle.click(); await wait();
     d.querySelector('#servers-list [role="button"]')?.click();
     await wait(700);

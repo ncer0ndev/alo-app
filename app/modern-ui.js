@@ -51,6 +51,15 @@
     svg.append(path);
     tab.prepend(svg);
   }
+  const menuHeading = document.createElement('div');
+  menuHeading.className = 'home-nav-heading'; menuHeading.textContent = 'ÇALIŞMA ALANI';
+  bar.prepend(menuHeading);
+  const settingsTab = tabs.find(tab => tab.dataset.tab === 'settings');
+  settingsTab.classList.add('home-settings-gear');
+  settingsTab.setAttribute('aria-label', 'Ayarlar'); settingsTab.title = 'Ayarlar';
+  settingsTab.querySelector('path').setAttribute('d', 'M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8M9 3h6l1 3 3 1 2 5-2 5-3 1-1 3H9l-1-3-3-1-2-5 2-5 3-1 1-3');
+  [...settingsTab.childNodes].filter(node => node.nodeType === Node.TEXT_NODE).forEach(node => node.remove());
+  bar.append(settingsTab);
   bar.addEventListener('keydown', (event) => {
     if (!['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
     const visible = tabs.filter((tab) => !tab.classList.contains('hidden'));

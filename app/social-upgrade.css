@@ -44,6 +44,13 @@
 .community-main > .social-tools { flex-shrink: 0; margin: 8px 16px; max-height: 55vh; overflow-y: auto; }
 #group-message { background: var(--bg); color: var(--fg); border: 1px solid var(--border); border-radius: 6px; padding: 10px; flex: 1; min-width: 0; }
 .voice-dock { position: fixed; z-index: 1100; left: 12px; bottom: 12px; width: 300px; max-width: calc(100vw - 24px); padding: 12px; box-sizing: border-box; border: 1px solid var(--border); border-radius: 12px; background: var(--panel); color: var(--fg); box-shadow: 0 8px 28px #0005; }
+.ui-mode-switch-row[hidden] { display: none !important; }
+.home-nav-heading { padding: 14px 12px 20px; font-size: 9px; color: var(--dim); font-weight: 700; letter-spacing: 1.8px; }
+[data-ui=modern] .tab-bar { padding: 16px 12px; gap: 6px; }
+[data-ui=modern] .tab-bar .tab-btn { border-radius: 9px; padding: 12px; gap: 12px; font-size: 12px; }
+[data-ui=modern] .tab-bar .tab-btn[data-tab=create] { margin-top: 18px; border-top: 1px solid var(--border); padding-top: 18px; }
+[data-ui=modern] .tab-bar .tab-btn[data-tab=profile] { margin-top: 18px; }
+[data-ui=modern] .tab-bar .home-settings-gear { margin-top: auto; width: 36px; height: 36px; min-height: 36px; padding: 8px; justify-content: center; align-self: flex-start; border: 1px solid var(--border); }
 .voice-dock[hidden] { display: none; }
 .voice-dock-title { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; font-size: 12px; }
 .voice-dock-title strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

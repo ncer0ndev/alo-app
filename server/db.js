@@ -383,7 +383,7 @@ async function countUnreadDirectMessages(userId, otherUserId) {
 async function markDmRead(userId, otherUserId, ts) {
   await adapter.query({
     sql: `INSERT INTO dm_read_state (user_id, other_user_id, last_read_at) VALUES (?, ?, ?)
-          ON CONFLICT(user_id, other_user_id) DO UPDATE SET last_read_at = MAX(dm_read_state.last_read_at, excluded.last_read_at)`,
+          ON CONFLICT(user_id, other_user_id) DO UPDATE SET last_read_at = CASE WHEN excluded.last_read_at > dm_read_state.last_read_at THEN excluded.last_read_at ELSE dm_read_state.last_read_at END`,
     args: [userId, otherUserId, ts],
   });
 }
@@ -971,7 +971,7 @@ async function getChannelReadState(userId, channelId) {
 async function markChannelRead(userId, channelId, ts) {
   await adapter.query({
     sql: `INSERT INTO server_channel_read_state (user_id, channel_id, last_read_at) VALUES (?, ?, ?)
-          ON CONFLICT(user_id, channel_id) DO UPDATE SET last_read_at = MAX(server_channel_read_state.last_read_at, excluded.last_read_at)`,
+          ON CONFLICT(user_id, channel_id) DO UPDATE SET last_read_at = CASE WHEN excluded.last_read_at > server_channel_read_state.last_read_at THEN excluded.last_read_at ELSE server_channel_read_state.last_read_at END`,
     args: [userId, channelId, ts],
   });
 }

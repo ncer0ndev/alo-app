@@ -431,11 +431,11 @@ function prefersReducedMotion() {
 }
 
 function getUiMode() {
-  return localStorage.getItem('uiMode') === 'modern' ? 'modern' : 'classic';
+  return 'modern';
 }
 
 function applyUiMode(mode) {
-  const safeMode = mode === 'modern' ? 'modern' : 'classic';
+  const safeMode = 'modern';
   localStorage.setItem('uiMode', safeMode);
   document.documentElement.setAttribute('data-ui', safeMode);
   document.documentElement.setAttribute('data-theme', getTheme());
@@ -1989,10 +1989,12 @@ async function openDmThread(targetUsername) {
     // sessizce yoksay
   }
 
-  fetch(`${getServerUrl()}/api/dm/${encodeURIComponent(targetUsername)}/read`, {
+  await fetch(`${getServerUrl()}/api/dm/${encodeURIComponent(targetUsername)}/read`, {
     method: 'POST',
     headers: { Authorization: `Bearer ${token}` },
-  }).catch(() => {});
+  }).then(response => { if (!response.ok) throw new Error('Okundu bilgisi kaydedilemedi.'); }).catch(() => {
+    showToast('Okundu bilgisi kaydedilemedi. Bağlantıyı kontrol et.', 'error');
+  });
 
   const conv = findDmConversation(targetUsername);
   if (conv) conv.unreadCount = 0;
