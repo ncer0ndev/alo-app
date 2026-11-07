@@ -1,12 +1,12 @@
 // Main-process only: no release credentials or updater IPC exposed to the renderer.
-function setupUpdater({ app, autoUpdater, dialog, Menu, getWindow, timers = globalThis, platform = process.platform }) {
+function setupUpdater({ app, autoUpdater, dialog, Menu, shell, getWindow, timers = globalThis, platform = process.platform }) {
   let busy = false;
   let downloaded = false;
   let promptOpen = false;
   let disposed = false;
   let startupTimer;
   let interval;
-  const supported = app.isPackaged && (platform === 'win32' || platform === 'darwin');
+  const supported = app.isPackaged && platform === 'win32';
 
   autoUpdater.autoDownload = true;
   autoUpdater.autoInstallOnAppQuit = false;
@@ -44,8 +44,15 @@ function setupUpdater({ app, autoUpdater, dialog, Menu, getWindow, timers = glob
 
   async function check(manual = false) {
     if (disposed) return;
+    if (app.isPackaged && platform === 'darwin') {
+      if (manual) {
+        const { response } = await message({ type: 'info', message: 'Mac güncellemeleri indirme sayfasından kurulur.', detail: `Mevcut sürüm: ${app.getVersion()}. Yeni DMG dosyasını indirip ALO uygulamasını Uygulamalar klasöründe değiştir.`, buttons: ['Vazgeç', 'İndirme sayfasını aç'], defaultId: 1, cancelId: 0 });
+        if (response === 1 && !disposed) await shell.openExternal('https://github.com/ncer0ndev/alo-app/releases/latest');
+      }
+      return;
+    }
     if (!supported) {
-      if (manual) await message({ type: 'info', message: 'Güncellemeler kurulu Windows veya macOS sürümünde kullanılabilir.' });
+      if (manual) await message({ type: 'info', message: app.isPackaged ? 'Bu işletim sisteminde otomatik güncelleme desteklenmiyor.' : 'Deneme sürümü açık; otomatik kurulum yapılmaz.', detail: app.isPackaged ? 'Yeni sürümü indirme sayfasından kurabilirsin.' : 'Bu pencere yerel kaynak kodunu çalıştırır. Güncel kodu görmek için uygulamayı yeniden aç. Otomatik güncelleme, yayınlanmış kurulum paketiyle çalışır.' });
       return;
     }
     if (downloaded) return manual ? offerInstall() : undefined;
@@ -58,9 +65,10 @@ function setupUpdater({ app, autoUpdater, dialog, Menu, getWindow, timers = glob
       const result = await autoUpdater.checkForUpdates();
       if (result?.downloadPromise) await result.downloadPromise;
       else if (manual) await message({ type: 'info', message: 'En güncel sürümü kullanıyorsun.', detail: `Sürüm: ${app.getVersion()}` });
-    } catch {
+    } catch (error) {
       // Background network failures are retried on the next scheduled check.
-      if (manual) await message({ type: 'warning', message: 'Güncelleme alınamadı.', detail: 'İnternet bağlantını kontrol edip tekrar dene. Yayınlanmış bir sürüm henüz bulunmuyor olabilir.' });
+      const invalidVersion = /invalid.*version|semver|ERR_UPDATER_INVALID_VERSION/i.test(String(error?.message || '') + String(error?.code || ''));
+      if (manual) await message({ type: 'warning', message: 'Güncelleme alınamadı.', detail: invalidVersion ? 'Yayınlanan sürümün etiketi geçersiz. Yayın etiketi ve paket sürümü eşleşmeli (örneğin v1.10.4 ve 1.10.4). Yayının düzeltilmesi gerekiyor.' : 'İnternet bağlantını kontrol edip tekrar dene. Yayında bu platforma ait kurulum ve güncelleme dosyaları eksik olabilir.' });
     } finally { busy = false; }
   }
 

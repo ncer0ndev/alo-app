@@ -249,7 +249,7 @@ function runApp() {
       } catch { callback({}); }
     });
     createWindow();
-    updaterCtl = setupUpdater({ app, autoUpdater, dialog, Menu, getWindow: () => mainWindow });
+    updaterCtl = setupUpdater({ app, autoUpdater, dialog, Menu, shell, getWindow: () => mainWindow });
     createTray();
     app.on('activate', () => {
       if (BrowserWindow.getAllWindows().length === 0) createWindow();

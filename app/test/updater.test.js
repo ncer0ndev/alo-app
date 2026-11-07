@@ -10,14 +10,16 @@ function fixture(packaged = true, platform = process.platform) {
   let installs = 0;
   let response = 0;
   const messages = [];
+  const links = [];
   updater.checkForUpdates = async () => { checks++; return {}; };
   updater.quitAndInstall = () => { installs++; };
   const controller = setupUpdater({ app, autoUpdater: updater,
+    shell: { openExternal: async url => { links.push(url); } },
     dialog: { showMessageBox: async (options) => { messages.push(options); return { response }; } },
     Menu: { buildFromTemplate: x => x, setApplicationMenu() {} }, getWindow: () => null,
     timers: { setTimeout: () => ({}), setInterval: () => ({}), clearTimeout() {}, clearInterval() {} }, platform,
   });
-  return { app, updater, controller, messages, checks: () => checks, installs: () => installs, choose: x => { response = x; } };
+  return { app, updater, controller, messages, links, checks: () => checks, installs: () => installs, choose: x => { response = x; } };
 }
 
 test('development does not request releases', async () => {
@@ -29,7 +31,7 @@ test('development does not request releases', async () => {
 });
 
 test('download never installs without explicit restart choice', async () => {
-  const f = fixture();
+  const f = fixture(true, 'win32');
   assert.equal(f.updater.autoInstallOnAppQuit, false);
   f.updater.emit('update-downloaded');
   await new Promise(setImmediate);
@@ -37,7 +39,7 @@ test('download never installs without explicit restart choice', async () => {
   assert.equal(f.messages[0].defaultId, 0);
   f.choose(1);
   await f.controller.check(true);
-  assert.equal(f.installs(), process.platform === 'win32' || process.platform === 'darwin' ? 1 : 0);
+  assert.equal(f.installs(), 1);
   f.controller.dispose();
 });
 
@@ -72,9 +74,15 @@ test('quit disposes updater listeners', () => {
   assert.equal(f.updater.listenerCount('update-downloaded'), 0);
 });
 
-test('packaged macOS builds check for updates', async () => {
+test('unsigned macOS builds offer the download page without automatic installation', async () => {
   const f = fixture(true, 'darwin');
   await f.controller.check(true);
-  assert.equal(f.checks(), 1);
+  assert.equal(f.checks(), 0);
+  assert.match(f.messages[0].message, /Mac güncellemeleri/);
+  assert.equal(f.links.length, 0);
+  f.choose(1);
+  await f.controller.check(true);
+  assert.deepEqual(f.links, ['https://github.com/ncer0ndev/alo-app/releases/latest']);
+  assert.equal(f.installs(), 0);
   f.controller.dispose();
 });

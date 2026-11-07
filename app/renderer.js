@@ -1,5 +1,5 @@
 /* global io */
-const SERVER_URL = 'https://alo-app.onrender.com';
+const SERVER_URL = /^https?:$/.test(location.protocol) && location.pathname.startsWith('/mobile/') ? location.origin : 'https://alo-app.onrender.com';
 const DEFAULT_ICE_SERVERS = [{ urls: 'stun:stun.l.google.com:19302' }];
 const CALL_COOLDOWN_MS = 3000;
 

@@ -97,6 +97,8 @@ function generateTempPassword() {
 const app = express();
 app.use(cors());
 app.use(express.json());
+app.get('/mobile', (_req, res) => res.redirect(302, '/mobile/'));
+app.use('/mobile', require('./mobile-web')());
 
 const server = http.createServer(app);
 const io = new Server(server, { cors: { origin: '*' } });

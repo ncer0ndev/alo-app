@@ -1,19 +1,24 @@
-name: Publish Windows release
+name: Publish Windows and Mac release
 on:
   workflow_dispatch:
-    inputs:
-      version:
-        description: 'Yayın sürümü (örnek: 1.10.3)'
-        required: true
-        type: string
 permissions:
-  contents: write
+  contents: read
+concurrency:
+  group: desktop-release
+  cancel-in-progress: false
 jobs:
-  windows:
-    runs-on: windows-latest
-    defaults:
-      run:
-        working-directory: app
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            command: dist
+            artifact: windows
+          - os: macos-latest
+            command: dist:mac
+            artifact: macos
+    runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -22,25 +27,58 @@ jobs:
           cache: npm
           cache-dependency-path: app/package-lock.json
       - run: npm ci
-      - name: Validate and set release version
-        shell: pwsh
+        working-directory: app
+      - run: node --test test/updater.test.js test/experience.test.js
+        working-directory: app
+      - run: npm run ${{ matrix.command }}
+        working-directory: app
         env:
-          RELEASE_VERSION: ${{ inputs.version }}
-        run: |
-          if ($env:RELEASE_VERSION -notmatch '^\d+\.\d+\.\d+(-[0-9A-Za-z.-]+)?$') {
-            throw "Gecersiz surum: $env:RELEASE_VERSION"
-          }
-          npm version $env:RELEASE_VERSION --no-git-tag-version
-      - run: node --test test/updater.test.js
-      - name: Build installer and publish GitHub release
-        run: npm run release
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
       - uses: actions/upload-artifact@v4
         with:
-          name: windows-installer-and-update-metadata
+          name: ${{ matrix.artifact }}
           path: |
             app/dist/*.exe
             app/dist/*.blockmap
-            app/dist/latest.yml
+            app/dist/*.dmg
+            app/dist/*.zip
+            app/dist/latest*.yml
           if-no-files-found: error
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          path: release-assets
+          merge-multiple: true
+      - name: Validate packages and update metadata
+        run: |
+          node <<'NODE'
+          const fs = require('fs');
+          const version = require('./app/package.json').version;
+          if (!/^\d+\.\d+\.\d+$/.test(version)) throw Error('Stable semantic version required');
+          const files = fs.readdirSync('release-assets');
+          for (const name of ['latest.yml', 'latest-mac.yml']) {
+            const metadata = fs.readFileSync('release-assets/' + name, 'utf8');
+            if (!metadata.split(/\r?\n/).includes('version: ' + version)) throw Error('Metadata version mismatch: ' + name);
+          }
+          for (const extension of ['.exe', '.exe.blockmap', '.dmg', '.zip']) {
+            if (!files.some(name => name.includes(version) && name.endsWith(extension))) throw Error('Missing package: ' + extension);
+          }
+          fs.appendFileSync(process.env.GITHUB_ENV, 'RELEASE_TAG=v' + version + '\n');
+          NODE
+      - name: Publish only after both platforms are ready
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          if gh release view "$RELEASE_TAG" --json isDraft > release-state.json 2>/dev/null; then
+            node -e "if (!require('./release-state.json').isDraft) throw Error('This version is already published. Increase app/package.json version.');"
+          else
+            gh release create "$RELEASE_TAG" --draft --target "$GITHUB_SHA" --title "ALO $RELEASE_TAG" --generate-notes
+          fi
+          gh release upload "$RELEASE_TAG" release-assets/* --clobber
+          gh release edit "$RELEASE_TAG" --draft=false --latest

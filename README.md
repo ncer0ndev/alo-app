@@ -111,6 +111,36 @@ npm ci
 npm run dist:mac
 ```
 
+## Mobil web / PWA
+
+Sunucu aynı hesap ve görüşme altyapısını `/mobile/` altında mobil web arayüzüyle
+birlikte sunar. Yerelde `server/` içinde `npm start` sonrası
+`http://localhost:3000/mobile/` açılabilir. Gerçek telefonda mikrofon ve PWA
+kurulumu için HTTPS üzerinden yayınlanmalıdır. Masaüstü Electron istemcisi
+aynı kod tabanını kullanır ve mobil düzen yalnızca web istemcisinde uygulanır.
+
+Yayın sonrasında iPhone'da Safari → Paylaş → Ana Ekrana Ekle, Android'de
+Chrome → Uygulamayı yükle / Ana ekrana ekle kullanılabilir. Android yükleme
+istemini tarayıcı desteklediğinde Ayarlar'da yükleme düğmesi de çıkar.
+
+Web istemcisinde tepsi, başlangıç uygulaması, oyun algılama ve sistem genelinde
+bas-konuş gösterilmez. Ekran paylaşma desteği cihazdan kontrol edilir;
+desteklenmeyen telefonda yayın düğmesi gizlenir, gelen paylaşım izlenebilir.
+Hoparlör yönlendirme ve arka plan/ekran kilidi sırasında görüşmenin sürmesi
+tarayıcıya bağlıdır; gerçek iPhone/Android üzerinde ayrıca test edilmelidir.
+
+Service worker yalnızca çevrimdışı karşılama sayfasını ve kurulum ikonlarını
+saklar; mesajlar, tokenlar ve API yanıtları cache'e alınmaz. Yeni sürümün
+etkinleşmesi açık eski PWA pencereleri kapandıktan sonra gerçekleşir; açık
+görüşme sırasında zorla yenileme yapılmaz.
+
+Mobil statik dosya testi:
+
+```bash
+cd server
+node --test test/mobile-web.test.js
+```
+
 ## Testler
 
 ```bash
@@ -120,3 +150,14 @@ npm test
 
 Her test dosyası kendi izole geçici SQLite dosyasını kullanır (gerçek bir
 PostgreSQL'e ihtiyaç duymaz), bu yüzden `npm test` hep hızlı ve yerel çalışır.
+
+### Masaüstü sürüm yayınlama
+
+`app/package.json` ve `app/package-lock.json` sürümlerini birlikte artırın.
+GitHub Actions içindeki **Publish Windows and Mac release** akışını çalıştırın.
+Akış iki platformu aynı koddan derler; her ikisi başarılı olduğunda dosyaları
+önce taslağa yükler ve `vX.Y.Z` etiketli yayını son sürüm olarak yayınlar.
+Yayınlanmış sürüm numarası tekrar kullanılmaz.
+Windows güncellemeyi uygulama içinden indirir ve onayla kurar.
+Apple imzası olmayan Mac sürümünde güncelleme düğmesi indirme sayfasını açar;
+DMG içindeki uygulama Uygulamalar klasöründeki eski sürümün yerine kopyalanır.
