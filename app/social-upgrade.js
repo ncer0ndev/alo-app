@@ -1,5 +1,19 @@
 // Screen sharing uses separate peer connections so voice tracks stay untouched.
 (() => {
+  const section = document.createElement('section'); section.className = 'social-tools app-settings';
+  section.innerHTML = '<h3>Uygulama</h3><p class="app-version">Sürüm bilgisi yükleniyor…</p><button type="button" class="btn btn-ghost app-update">Güncellemeleri denetle / yükle</button><p>Güncelleme hazırsa yeniden başlatma onayı gösterilir.</p><h4>Klavye kısayolları</h4><p>Ctrl/Cmd + C: Kopyala · X: Kes · V: Yapıştır<br>Ctrl/Cmd + Z: Geri al · A: Tümünü seç</p><button type="button" class="btn btn-ghost app-exit">Uygulamayı kapat</button><p class="app-action-status" role="status"></p>';
+  document.querySelector('#tab-settings').append(section);
+  window.api?.getAppInfo?.().then(info => { section.querySelector('.app-version').textContent = info ? `ALO ${info.version}${info.packaged ? '' : ' · Geliştirme sürümü'}` : 'ALO'; }).catch(() => {});
+  const update = section.querySelector('.app-update'); update.disabled = !window.api?.checkAppUpdate;
+  update.onclick = async () => {
+    update.disabled = true;
+    try { await window.api.checkAppUpdate(); } catch { section.querySelector('.app-action-status').textContent = 'Güncelleme denetlenemedi. Tekrar dene.'; }
+    finally { update.disabled = false; }
+  };
+  const exit = section.querySelector('.app-exit'); exit.disabled = !window.api?.quitApp;
+  exit.onclick = () => { if (confirm('Uygulama kapanacak ve açık görüşmen sonlanacak. Devam edilsin mi?')) window.api.quitApp(); };
+})();
+(() => {
   const panel = document.createElement('section');
   panel.className = 'social-tools';
   panel.innerHTML = '<button class="btn" id="share-screen">Ekran paylaş</button><label><input type="checkbox" id="share-audio"> Sistem sesini paylaş (destekleniyorsa)</label><button class="btn btn-ghost" id="share-fullscreen">Tam ekran</button><span id="share-status" role="status"></span><video id="shared-screen" autoplay playsinline hidden></video>';
@@ -380,7 +394,7 @@
     const username = getSession().username;
     if (username && guidedUser !== username) {
       guidedUser = username; sounds.checked = read('sounds', true); dnd.checked = read('dnd', false);
-      if (!read('guided', false) && !guide.open) guide.showModal();
+      // First-run setup is handled by setup.js; this guide remains available on demand.
     }
     settings.querySelector('#social-network').textContent = !socket ? 'Oturum açılmadı' : socket.connected ? 'Bağlantı açık' : 'Bağlantı koptu — yeniden bağlanılıyor…';
     if (socket !== bound) {

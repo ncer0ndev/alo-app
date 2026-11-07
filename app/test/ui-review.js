@@ -17,8 +17,6 @@ document.getElementById('run').onclick = async () => {
     };
     d.querySelector('#rail-home-btn').click();
     await clickTab('settings');
-    const toggle = d.querySelector('#ui-mode-toggle');
-    if (!toggle.checked) { toggle.click(); await wait(); }
     d.querySelector('[name="theme-select"][value="modern"]').click();
     await clickTab('friends');
     const nav = d.querySelector('.tab-bar').getBoundingClientRect();
@@ -38,9 +36,7 @@ document.getElementById('run').onclick = async () => {
       await wait(50);
       check(d.documentElement.dataset.theme === theme && d.documentElement.dataset.ui === 'modern', `${width}: bağımsız ${theme} teması`);
     }
-    toggle.click(); await wait();
-    check(d.documentElement.dataset.ui === 'modern' && toggle.disabled, `${width}: yalnızca modern arayüz etkin`);
-    toggle.click(); await wait();
+    check(d.documentElement.dataset.ui === 'modern' && !d.querySelector('#ui-mode-toggle'), `${width}: yalnızca modern arayüz etkin`);
     d.querySelector('#servers-list [role="button"]')?.click();
     await wait(700);
     check(visible('#server-text-channel-view') && fits('#text-channel-input'), `${width}: sohbet yazma alanı görünür`);

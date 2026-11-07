@@ -65,6 +65,7 @@ function setupUpdater({ app, autoUpdater, dialog, Menu, getWindow, timers = glob
   }
 
   function refreshMenu() {
+    if (platform !== 'darwin') { Menu.setApplicationMenu(null); return; }
     Menu.setApplicationMenu(Menu.buildFromTemplate([
       { label: 'Uygulama', submenu: [
         { label: `Sürüm ${app.getVersion()}`, enabled: false },

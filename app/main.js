@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, globalShortcut, shell, dialog, Menu, Tray, Notification, desktopCapturer, session } = require('electron');
+const { app, BrowserWindow, ipcMain, globalShortcut, shell, dialog, Menu, Tray, Notification, desktopCapturer, session, nativeImage } = require('electron');
 const { autoUpdater } = require('electron-updater');
 const { setupUpdater } = require('./updater');
 const path = require('path');
@@ -25,6 +25,12 @@ function runApp() {
   let updaterCtl = null;
   let backgroundPref = false;
   let isQuitting = false;
+  ipcMain.handle('app-info', event => isTrustedSender(event) ? { version: app.getVersion(), packaged: app.isPackaged } : null);
+  ipcMain.handle('check-app-update', async event => {
+    if (!isTrustedSender(event) || !updaterCtl) return false;
+    await updaterCtl.check(true); return true;
+  });
+  ipcMain.on('quit-app', event => { if (isTrustedSender(event)) { isQuitting = true; app.quit(); } });
   let screenSources = new Map();
   let selectedScreen = null;
   ipcMain.handle('screen-sources', async event => {
@@ -207,7 +213,9 @@ function runApp() {
   }
 
   function createTray() {
-    tray = new Tray(TRAY_ICON_PATH);
+    const trayImage = nativeImage.createFromPath(TRAY_ICON_PATH);
+    if (process.platform === 'darwin') trayImage.setTemplateImage(true);
+    tray = new Tray(trayImage);
     tray.setToolTip('Alo // Voice');
     tray.setContextMenu(
       Menu.buildFromTemplate([
@@ -232,6 +240,7 @@ function runApp() {
   }
 
   app.whenReady().then(() => {
+    if (process.platform === 'darwin') app.dock?.setIcon(ICON_PATH);
     session.defaultSession.setDisplayMediaRequestHandler(async (request, callback) => {
       try {
         const selection = selectedScreen; selectedScreen = null;

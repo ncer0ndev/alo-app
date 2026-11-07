@@ -60,9 +60,25 @@
   settingsTab.querySelector('path').setAttribute('d', 'M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8M9 3h6l1 3 3 1 2 5-2 5-3 1-1 3H9l-1-3-3-1-2-5 2-5 3-1 1-3');
   [...settingsTab.childNodes].filter(node => node.nodeType === Node.TEXT_NODE).forEach(node => node.remove());
   bar.append(settingsTab);
+  const profileTab = tabs.find(tab => tab.dataset.tab === 'profile');
+  profileTab.classList.add('header-profile-button');
+  profileTab.setAttribute('role', 'button');
+  profileTab.setAttribute('aria-label', 'Profilim'); profileTab.title = 'Profilim';
+  [...profileTab.childNodes].filter(node => node.nodeType === Node.TEXT_NODE).forEach(node => node.remove());
+  const headerActions = document.createElement('div'); headerActions.className = 'header-account-actions';
+  settingsTab.classList.add('header-settings-button'); settingsTab.setAttribute('role', 'button');
+  headerActions.append(settingsTab, profileTab);
+  document.querySelector('.masthead').append(headerActions);
+  const syncProfileAccess = () => {
+    const hidden = !getSession().token;
+    headerActions.hidden = hidden;
+    profileTab.hidden = hidden; profileTab.tabIndex = hidden ? -1 : 0;
+    settingsTab.tabIndex = hidden ? -1 : 0;
+  };
+  syncProfileAccess(); setInterval(syncProfileAccess, 500);
   bar.addEventListener('keydown', (event) => {
     if (!['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
-    const visible = tabs.filter((tab) => !tab.classList.contains('hidden'));
+    const visible = tabs.filter((tab) => tab.parentElement === bar && !tab.classList.contains('hidden'));
     const current = visible.indexOf(document.activeElement);
     if (current < 0) return;
     event.preventDefault();

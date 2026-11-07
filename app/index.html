@@ -4,6 +4,7 @@
   <meta charset="UTF-8" />
   <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; font-src 'self'; connect-src 'self' https://alo-app.onrender.com wss://alo-app.onrender.com; img-src 'self' data: https://alo-app.onrender.com https://res.cloudinary.com; media-src 'self' blob:; object-src 'none'; base-uri 'none'; form-action 'none';" />
   <title>ALO</title>
+  <link rel="icon" type="image/x-icon" href="assets/icon.ico" />
   <script src="theme-init.js"></script>
   <link rel="stylesheet" href="fonts/fonts.css" />
   <link rel="stylesheet" href="styles.css" />
@@ -12,15 +13,15 @@
 </head>
 <body>
   <div id="boot-overlay" class="update-overlay" role="status" aria-live="polite">
-    <div class="update-overlay-mark" aria-hidden="true">···</div>
-    <p class="update-overlay-text">ALO <span class="masthead-slash">//</span> VOICE</p>
+    <div class="update-overlay-mark" aria-hidden="true"><img class="brand-logo" src="assets/logo-white.png" alt="" /></div>
+    <p class="update-overlay-text">ALO</p>
     <p class="update-overlay-hint">SYSTEM_READY<span class="cursor">_</span></p>
   </div>
 
   <div class="texture-overlay" aria-hidden="true"></div>
 
   <div id="update-overlay" class="update-overlay hidden" role="status" aria-live="assertive">
-    <div class="update-overlay-mark" aria-hidden="true">···</div>
+    <div class="update-overlay-mark" aria-hidden="true"><img class="brand-logo" src="assets/logo-white.png" alt="" /></div>
     <p class="update-overlay-text">GÜNCELLENİYOR<span class="cursor">_</span></p>
     <p class="update-overlay-hint">Uygulama birkaç saniye içinde yeniden başlayacak.</p>
   </div>
@@ -95,10 +96,7 @@
   </div>
 
   <header class="masthead">
-    <pre class="masthead-ascii" aria-hidden="true">+==============================+
-|      A L O  //  V O I C E     |
-+==============================+</pre>
-    <h1 class="masthead-title">ALO <span class="masthead-slash">//</span> VOICE</h1>
+    <h1 class="masthead-title"><img class="brand-logo masthead-logo" src="assets/logo-white.png" alt="ALO" /></h1>
     <div class="cursor-line">SYSTEM_READY<span class="cursor">_</span></div>
   </header>
 
@@ -153,7 +151,7 @@
               <button id="servers-retry-btn" class="btn btn-ghost hidden">[ TEKRAR DENE ]</button>
             </div>
             <ul id="servers-list" class="community-server-list"></ul>
-            <p id="servers-empty" class="community-empty hidden">Henüz bir topluluğun yok.</p>
+            <p id="servers-empty" class="community-empty hidden">Henüz bir topluluğun yok. Aşağıdan topluluk oluştur veya arkadaşının davet koduyla katıl.</p>
 
             <details class="community-action-panel">
               <summary>+ Topluluk oluştur</summary>
@@ -209,18 +207,18 @@
 
           <div class="section-header">// arkadaşlar</div>
           <ul id="friends-list" class="friend-list"></ul>
-          <p id="friends-empty" class="status-line hidden">henüz arkadaşın yok</p>
+          <p id="friends-empty" class="status-line hidden">İlk sohbetini başlat: yukarıya arkadaşının kullanıcı adını yazıp istek gönder.</p>
         </div>
 
         <div id="tab-dm" class="tab-content hidden">
           <div id="dm-list-view">
             <div class="section-header">// mesajlar</div>
             <ul id="dm-conversations" class="friend-list"></ul>
-            <p id="dm-conversations-empty" class="status-line hidden">henüz arkadaşın yok</p>
+            <p id="dm-conversations-empty" class="status-line hidden">Henüz sohbetin yok. Arkadaşlar bölümünden birini ekle veya Mesajlar yanındaki + ile grup oluştur.</p>
           </div>
           <div id="dm-thread-view" class="hidden">
             <div class="room-code-row">
-              <button id="dm-back-btn" class="btn btn-ghost">[ ◂ GERİ ]</button>
+              <button id="dm-back-btn" class="btn btn-ghost" aria-label="Sohbet listesine dön" title="Geri">←</button>
               <span id="dm-thread-username" class="prompt"></span>
             </div>
             <div id="dm-log" class="chat-log" role="log" aria-live="polite"></div>
@@ -257,17 +255,6 @@
         </div>
 
         <div id="tab-settings" class="tab-content hidden">
-          <div class="section-header">// arayüz</div>
-          <label class="ui-mode-switch-row hidden" hidden>
-            <span class="ui-mode-switch-copy">
-              <span class="ui-mode-switch-title">Modern arayüz</span>
-              <span class="ui-mode-switch-hint">Yan menülü düzen. Aşağıdan istediğin rengi seçebilirsin.</span>
-            </span>
-            <span class="ui-mode-switch">
-              <input type="checkbox" id="ui-mode-toggle" checked disabled />
-              <span class="ui-mode-switch-track" aria-hidden="true"><span class="ui-mode-switch-thumb"></span></span>
-            </span>
-          </label>
 
           <div class="section-header">// görünüm</div>
           <div class="theme-options" role="radiogroup" aria-label="Tema seç">
@@ -712,10 +699,12 @@
   <script src="avatars.js"></script>
   <script src="banner-catalog.js"></script>
   <script src="banners.js"></script>
+  <script src="experience.js"></script>
   <script src="renderer.js"></script>
   <script src="modern-ui.js"></script>
   <link rel="stylesheet" href="social-upgrade.css">
   <script src="social-upgrade.js"></script>
+  <script src="setup.js"></script>
 
 </body>
 </html>

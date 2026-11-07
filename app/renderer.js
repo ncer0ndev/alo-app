@@ -324,6 +324,7 @@ const seenDmMessageIds = new Set();
 // ---- yardimci: bildirim / durum satirlari ----
 
 function showToast(text, kind = 'info', durationMs = 4000) {
+  if (kind === 'error' && window.aloFriendlyError) text = window.aloFriendlyError(text);
   toastEl.textContent = `[${kind.toUpperCase()}] ${text}`;
   toastEl.className = `toast ${kind}`;
   toastEl.classList.remove('hidden');
@@ -492,13 +493,13 @@ async function authRequest(endpoint) {
     });
     const data = await res.json();
     if (!res.ok) {
-      setAuthStatus(data.error || 'bir hata oluştu', 'error');
+      setAuthStatus(window.aloFriendlyError(data.error, res.status), 'error');
       return;
     }
     saveSession(data.token, data.username);
     enterJoinScreen(data.username);
   } catch (err) {
-    setAuthStatus('sunucuya ulaşılamadı: ' + err.message, 'error');
+    setAuthStatus(window.aloFriendlyError(err), 'error');
   }
 }
 
@@ -897,7 +898,7 @@ async function apiRequest(endpoint, body) {
     body: JSON.stringify(body || {}),
   });
   const data = await res.json();
-  if (!res.ok) throw new Error(data.error || 'bir hata oluştu');
+  if (!res.ok) throw new Error(window.aloFriendlyError(data.error, res.status));
   return data;
 }
 
@@ -913,7 +914,7 @@ async function apiUpload(endpoint, fieldName, file) {
     body: form,
   });
   const data = await res.json();
-  if (!res.ok) throw new Error(data.error || 'bir hata oluştu');
+  if (!res.ok) throw new Error(window.aloFriendlyError(data.error, res.status));
   return data;
 }
 
@@ -2100,7 +2101,7 @@ async function apiDelete(endpoint) {
     headers: { Authorization: `Bearer ${token}` },
   });
   const data = await res.json();
-  if (!res.ok) throw new Error(data.error || 'bir hata oluştu');
+  if (!res.ok) throw new Error(window.aloFriendlyError(data.error, res.status));
   return data;
 }
 
@@ -2229,7 +2230,36 @@ async function joinServerByCode() {
 // (taskbar gibi) - ayni <ul id="servers-list"> tek DOM'da kalir, CSS
 // .collapsed sinifiyla gorunumu degistirir.
 
+let channelRailMotion = null;
+function animateChannelRail(entering) {
+  const rail = document.getElementById('server-channel-rail');
+  if (!rail) return;
+  channelRailMotion?.cancel();
+  if (entering) {
+    channelRailMotion = rail.animate([
+      { opacity: 0, transform: 'translateX(-100%)' },
+      { opacity: 1, transform: 'translateX(0)' },
+    ], { duration: 360, easing: 'cubic-bezier(.22,1,.36,1)' });
+  } else {
+    // Animate a visual copy so hiding the community cannot cancel the exit.
+    const bounds = rail.getBoundingClientRect();
+    if (!bounds.width || !bounds.height) return;
+    const snapshot = rail.cloneNode(true);
+    snapshot.removeAttribute('id');
+    snapshot.querySelectorAll('[id]').forEach(element => element.removeAttribute('id'));
+    snapshot.setAttribute('aria-hidden', 'true'); snapshot.inert = true;
+    Object.assign(snapshot.style, { position: 'fixed', left: `${bounds.left}px`, top: `${bounds.top}px`, width: `${bounds.width}px`, height: `${bounds.height}px`, margin: '0', boxSizing: 'border-box', zIndex: '1050', pointerEvents: 'none' });
+    document.body.append(snapshot);
+    const exit = snapshot.animate([
+      { opacity: 1, transform: 'translateX(0)' },
+      { opacity: 0, transform: 'translateX(-100%)' },
+    ], { duration: 220, easing: 'cubic-bezier(.4,0,1,1)', fill: 'forwards' });
+    exit.finished.then(() => snapshot.remove(), () => snapshot.remove());
+  }
+}
+
 function enterHomeMode() {
+  if (!communityArea.classList.contains('hidden')) animateChannelRail(false);
   document.querySelector('#community-area .community-main').classList.remove('voice-stage-open');
   if (roomScreen.classList.contains('embedded-voice')) roomScreen.classList.add('hidden');
   activeServerDetail = null;
@@ -2246,10 +2276,12 @@ function enterHomeMode() {
 }
 
 function enterCommunityMode() {
+  const entering = communityArea.classList.contains('hidden');
   communityRail.classList.add('collapsed');
   railHomeBtn.classList.remove('active');
   homeArea.classList.add('hidden');
   communityArea.classList.remove('hidden');
+  if (entering) animateChannelRail(true);
 }
 
 async function openServerDetail(serverId) {

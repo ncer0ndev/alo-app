@@ -11,6 +11,9 @@ const PTT_KEYS = [
 ];
 
 contextBridge.exposeInMainWorld('api', {
+  getAppInfo: () => ipcRenderer.invoke('app-info'),
+  checkAppUpdate: () => ipcRenderer.invoke('check-app-update'),
+  quitApp: () => ipcRenderer.send('quit-app'),
   screenSources: () => ipcRenderer.invoke('screen-sources'),
   selectScreenSource: id => typeof id === 'string' ? ipcRenderer.invoke('screen-select', id) : Promise.resolve(false),
   pttKeyOptions: PTT_KEYS,
