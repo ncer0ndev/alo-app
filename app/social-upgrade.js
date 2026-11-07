@@ -1,0 +1,252 @@
+// Screen sharing uses separate peer connections so voice tracks stay untouched.
+(() => {
+  const panel = document.createElement('section');
+  panel.className = 'social-tools';
+  panel.innerHTML = '<button class="btn" id="share-screen">Ekran paylaş</button><label><input type="checkbox" id="share-audio"> Sistem sesini paylaş (destekleniyorsa)</label><button class="btn btn-ghost" id="share-fullscreen">Tam ekran</button><span id="share-status" role="status"></span><video id="shared-screen" autoplay playsinline hidden></video>';
+  document.querySelector('#room-screen').append(panel);
+  const video = panel.querySelector('video');
+  const status = panel.querySelector('#share-status');
+  const button = panel.querySelector('#share-screen');
+  let stream = null;
+  let owner = null;
+  let boundSocket = null;
+  let boundRoom = null;
+  let starting = false;
+  const peers = new Map();
+  const candidates = new Map();
+  function clearPeers() {
+    for (const pc of peers.values()) pc.close();
+    peers.clear(); candidates.clear(); video.srcObject = null; video.hidden = true;
+  }
+  function stop(notify = true) {
+    if (stream) { const old = stream; stream = null; old.getTracks().forEach(track => track.stop()); }
+    clearPeers(); button.textContent = 'Ekran paylaş';
+    if (notify && boundSocket?.connected) boundSocket.emit('screen-control', { action: 'stop' }, () => {});
+  }
+  function connection(id) {
+    if (peers.has(id)) return peers.get(id);
+    const pc = new RTCPeerConnection({ iceServers });
+    peers.set(id, pc);
+    pc.onicecandidate = event => {
+      if (event.candidate) boundSocket.emit('screen-signal', { to: id, data: { candidate: event.candidate } });
+    };
+    pc.ontrack = event => { video.srcObject = event.streams[0]; video.muted = false; video.hidden = false; video.play().catch(() => { status.textContent = 'Oynatmak için görüntüye tıkla.'; }); };
+    if (stream) stream.getTracks().forEach(track => pc.addTrack(track, stream));
+    return pc;
+  }
+  async function signal({ from, data }) {
+    try {
+      const pc = connection(from);
+      if (data.request && stream) {
+        await pc.setLocalDescription(await pc.createOffer());
+        boundSocket.emit('screen-signal', { to: from, data: { sdp: pc.localDescription } });
+      } else if (data.sdp) {
+        await pc.setRemoteDescription(data.sdp);
+        for (const candidate of candidates.get(from) || []) await pc.addIceCandidate(candidate);
+        candidates.delete(from);
+        if (data.sdp.type === 'offer') {
+          await pc.setLocalDescription(await pc.createAnswer());
+          boundSocket.emit('screen-signal', { to: from, data: { sdp: pc.localDescription } });
+        }
+      } else if (data.candidate) {
+        if (pc.remoteDescription) await pc.addIceCandidate(data.candidate);
+        else { if (!candidates.has(from)) candidates.set(from, []); candidates.get(from).push(data.candidate); }
+      }
+    } catch { status.textContent = 'Ekran bağlantısı kurulamadı. Paylaşımı yeniden başlat.'; }
+  }
+  function ownerChanged({ id }) {
+    owner = id;
+    if (!id) { stop(false); status.textContent = ''; }
+    else if (id !== boundSocket.id) {
+      stop(false); status.textContent = 'Ekran paylaşımı izleniyor';
+      boundSocket.emit('screen-signal', { to: id, data: { request: true } });
+    }
+  }
+  button.onclick = async () => {
+    if (stream) return stop();
+    if (starting || !socket?.connected || !currentRoomCode) return;
+    starting = true;
+    try {
+      const captured = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: panel.querySelector('#share-audio').checked });
+      stream = captured;
+      const result = await new Promise(resolve => socket.timeout(5000).emit('screen-control', { action: 'start' }, (error, result) => resolve(error ? { error: 'Sunucu yanıt vermedi.' } : result)));
+      if (result?.error) { captured.getTracks().forEach(track => track.stop()); throw new Error(result.error); }
+      stream = captured; video.srcObject = captured; video.muted = true; video.hidden = false;
+      captured.getVideoTracks()[0].onended = () => stop();
+      button.textContent = 'Paylaşımı durdur'; status.textContent = 'Ekranın paylaşılıyor';
+    } catch (error) { stop(); status.textContent = error.message || 'Paylaşım başlatılamadı.'; }
+    finally { starting = false; }
+  };
+  video.onclick = () => video.play().catch(() => {});
+  panel.querySelector('#share-fullscreen').onclick = () => { if (!video.hidden) video.requestFullscreen().catch(() => {}); };
+  setInterval(() => {
+    if (socket !== boundSocket) {
+      boundSocket?.off('screen-signal', signal); boundSocket?.off('screen-owner', ownerChanged);
+      stop(false); boundSocket = socket; boundRoom = null;
+      boundSocket?.on('screen-signal', signal); boundSocket?.on('screen-owner', ownerChanged);
+    }
+    if (currentRoomCode !== boundRoom || (!socket?.connected && boundRoom)) {
+      stop(false); boundRoom = currentRoomCode;
+      if (!socket?.connected) boundRoom = null;
+      if (boundRoom && socket?.connected) socket.emit('screen-control', { action: 'state' }, ownerChanged);
+    }
+  }, 500);
+})();
+
+(() => {
+  const section = document.createElement('section');
+  section.className = 'social-tools';
+  section.innerHTML = '<h3>Arkadaş grupları</h3><label>Grup adı<input id="group-name" maxlength="40"></label><label>Arkadaşların (virgülle ayır)<input id="group-members" placeholder="efe, deniz"></label><button class="btn" id="group-create">Grup oluştur</button><div id="group-list"></div><h4 id="group-title"></h4><p id="group-people"></p><div id="group-log" role="log" aria-live="polite"></div><div class="chat-input-row"><textarea id="group-message" maxlength="2000" placeholder="Grup mesajı"></textarea><button class="btn" id="group-send">Gönder</button><button class="btn" id="group-call">Grup aramasına katıl</button></div><p id="group-error" role="status"></p>';
+  document.querySelector('#tab-dm').append(section);
+  const el = id => section.querySelector('#' + id);
+  let selected = null;
+  let fetching = false;
+  const error = e => { el('group-error').textContent = e.message || String(e); };
+  async function request(path, body) {
+    const res = await fetch(getServerUrl() + path, { method: body ? 'POST' : 'GET', headers: { Authorization: 'Bearer ' + getSession().token, 'Content-Type': 'application/json' }, ...(body ? { body: JSON.stringify(body) } : {}) });
+    const data = await res.json(); if (!res.ok) throw new Error(data.error || 'İşlem tamamlanamadı.'); return data;
+  }
+  async function messages() {
+    if (!selected) return;
+    const id = selected.id;
+    const data = await request(`/api/groups/${id}/messages`);
+    if (selected?.id !== id) return;
+    el('group-people').textContent = data.members.map(m => m.username).join(', ');
+    const log = el('group-log'); const atBottom = log.scrollHeight - log.scrollTop - log.clientHeight < 40;
+    log.replaceChildren(...data.messages.map(message => {
+      const row = document.createElement('p');
+      const name = document.createElement('strong'); name.textContent = message.username + ': ';
+      row.append(name, document.createTextNode(message.text)); return row;
+    }));
+    if (atBottom) log.scrollTop = log.scrollHeight;
+  }
+  async function refresh() {
+    if (!getSession().token || fetching || !section.getClientRects().length) return;
+    fetching = true;
+    try {
+      const data = await request('/api/groups');
+      el('group-list').replaceChildren(...data.groups.map(group => {
+        const button = document.createElement('button'); button.className = 'btn btn-ghost'; button.textContent = group.name;
+        button.onclick = () => { selected = group; el('group-title').textContent = group.name; messages().catch(error); };
+        return button;
+      }));
+      await messages();
+    } catch (e) { error(e); } finally { fetching = false; }
+  }
+  el('group-create').onclick = async () => {
+    try {
+      selected = await request('/api/groups', { name: el('group-name').value, members: el('group-members').value.split(',').map(n => n.trim()).filter(Boolean) });
+      el('group-title').textContent = selected.name; await refresh();
+    } catch (e) { error(e); }
+  };
+  el('group-send').onclick = async () => {
+    if (!selected) return error(new Error('Önce bir grup seç.'));
+    try { await request(`/api/groups/${selected.id}/messages`, { text: el('group-message').value }); el('group-message').value = ''; await messages(); } catch (e) { error(e); }
+  };
+  el('group-call').onclick = async () => {
+    if (!selected) return error(new Error('Önce bir grup seç.'));
+    try {
+      if (currentRoomCode && !confirm('Mevcut görüşmeden ayrılıp grup aramasına katıl?')) return;
+      const data = await request(`/api/groups/${selected.id}/call`, {}); await joinRoomWithCode(data.roomCode);
+    } catch (e) { error(e); }
+  };
+  setInterval(refresh, 4000);
+})();
+
+(() => {
+  const profile = document.createElement('section'); profile.className = 'social-tools';
+  profile.innerHTML = '<h3>Hakkımda ve durum</h3><textarea id="social-about" maxlength="300" placeholder="Kendinden bahset"></textarea><select id="social-presence"><option value="online">Çevrimiçi</option><option value="busy">Meşgul</option><option value="dnd">Rahatsız etmeyin</option></select><select id="social-duration"><option value="0">Süresiz</option><option value="30">30 dakika</option><option value="60">1 saat</option><option value="240">4 saat</option></select><button class="btn">Profili kaydet</button><p role="status"></p>';
+  document.querySelector('#tab-profile').append(profile);
+  let loadedProfile = '';
+  setInterval(async () => {
+    const username = getSession().username;
+    if (!username || loadedProfile === username || !profile.getClientRects().length) return;
+    loadedProfile = username;
+    try {
+      const res = await fetch(getServerUrl() + '/api/social-profile/' + encodeURIComponent(username), { headers: { Authorization: 'Bearer ' + getSession().token } });
+      if (!res.ok) throw new Error(); const data = await res.json();
+      if (getSession().username !== username) return;
+      profile.querySelector('textarea').value = data.about;
+      profile.querySelector('#social-presence').value = data.presence;
+    } catch { loadedProfile = ''; }
+  }, 1000);
+  profile.querySelector('button').onclick = async () => {
+    try {
+      await apiRequest('/api/social-profile', { about: profile.querySelector('textarea').value, presence: profile.querySelector('#social-presence').value, duration: Number(profile.querySelector('#social-duration').value) });
+      profile.querySelector('p').textContent = 'Profil kaydedildi.';
+    } catch (error) { profile.querySelector('p').textContent = error.message; }
+  };
+  const info = document.createElement('p'); info.className = 'social-profile-info';
+  document.querySelector('#member-hover-card').append(info);
+  let lastName = '';
+  setInterval(async () => {
+    const card = document.querySelector('#member-hover-card');
+    const name = card.classList.contains('hidden') ? '' : document.querySelector('#member-hover-name').textContent;
+    if (name === lastName) return; lastName = name; info.textContent = '';
+    if (!name || !getSession().token) return;
+    try {
+      const res = await fetch(getServerUrl() + '/api/social-profile/' + encodeURIComponent(name), { headers: { Authorization: 'Bearer ' + getSession().token } });
+      if (!res.ok) return; const data = await res.json(); if (lastName !== name) return;
+      info.textContent = [data.about, data.presence === 'busy' ? 'Meşgul' : data.presence === 'dnd' ? 'Rahatsız etmeyin' : '', data.commonServers.length ? 'Ortak topluluklar: ' + data.commonServers.join(', ') : ''].filter(Boolean).join(' · ');
+    } catch { /* Existing profile remains usable offline. */ }
+  }, 400);
+})();
+
+(() => {
+  const key = name => `alo:${getSession().username || 'guest'}:${name}`;
+  const read = (name, fallback) => { try { return JSON.parse(localStorage.getItem(key(name))) ?? fallback; } catch { return fallback; } };
+  const write = (name, value) => localStorage.setItem(key(name), JSON.stringify(value));
+  const settings = document.createElement('section'); settings.className = 'social-tools';
+  settings.innerHTML = '<h3>Ses ve kullanım</h3><label><input type="checkbox" id="social-sounds"> Giriş, çıkış ve mesaj sesleri</label><label><input type="checkbox" id="social-dnd"> Rahatsız etmeyin (bildirim seslerini kapat)</label><button class="btn btn-ghost" id="social-guide">İlk kullanım rehberi ve kısayollar</button><p id="social-network" role="status"></p><h4>Son odalar</h4><div id="social-recent"></div>';
+  document.querySelector('#tab-settings').append(settings);
+  const sounds = settings.querySelector('#social-sounds'); const dnd = settings.querySelector('#social-dnd');
+  sounds.checked = read('sounds', true); dnd.checked = read('dnd', false);
+  sounds.onchange = () => write('sounds', sounds.checked);
+  dnd.onchange = () => write('dnd', dnd.checked);
+  const guide = document.createElement('dialog'); guide.className = 'social-guide';
+  guide.innerHTML = '<h2>ALO’ya hoş geldin</h2><p>Önce Ayarlar’dan mikrofonunu ve hoparlörünü seçip mikrofon testini çalıştır.</p><p>Arkadaşlar bölümünden arkadaş ekleyebilir, Mesajlar bölümünden özel grup oluşturabilirsin. Grup üyeleri “Grup aramasına katıl” ile aynı görüşmeye girer.</p><p>Ses odasında “Ekran paylaş” ile ekranını veya bir pencereyi seç. Sistem sesi kullanılabilirliği işletim sistemine bağlıdır.</p><h3>Kısayollar</h3><p>Ctrl/Cmd + Shift + M: mikrofonu aç/kapat<br>Escape: bu rehberi kapat<br>Bas konuş tuşunu Ayarlar’dan seçebilirsin.</p><button class="btn">Anladım</button>';
+  document.body.append(guide); guide.querySelector('button').onclick = () => { write('guided', true); guide.close(); };
+  settings.querySelector('#social-guide').onclick = () => guide.showModal();
+  document.addEventListener('keydown', event => {
+    if ((event.ctrlKey || event.metaKey) && event.shiftKey && event.code === 'KeyM' && localStream) { event.preventDefault(); document.querySelector('#mute-btn')?.click(); }
+  });
+  let lastRoom = null; let bound = null; let guidedUser = null;
+  function tone(kind) {
+    if (!sounds.checked || dnd.checked) return;
+    try {
+      const ctx = new AudioContext(); const oscillator = ctx.createOscillator(); const gain = ctx.createGain();
+      oscillator.frequency.value = kind === 'leave' ? 330 : kind === 'message' ? 660 : 480;
+      gain.gain.setValueAtTime(.035, ctx.currentTime); gain.gain.exponentialRampToValueAtTime(.001, ctx.currentTime + .14);
+      oscillator.connect(gain).connect(ctx.destination); oscillator.start(); oscillator.stop(ctx.currentTime + .15); oscillator.onended = () => ctx.close();
+    } catch { /* Browser may require an initial user gesture. */ }
+  }
+  const joined = () => tone('join'); const left = () => tone('leave'); const message = () => tone('message');
+  setInterval(() => {
+    const username = getSession().username;
+    if (username && guidedUser !== username) {
+      guidedUser = username; sounds.checked = read('sounds', true); dnd.checked = read('dnd', false);
+      if (!read('guided', false) && !guide.open) guide.showModal();
+    }
+    settings.querySelector('#social-network').textContent = !socket ? 'Oturum açılmadı' : socket.connected ? 'Bağlantı açık' : 'Bağlantı koptu — yeniden bağlanılıyor…';
+    if (socket !== bound) {
+      bound?.off('peer-joined', joined); bound?.off('peer-left', left); bound?.off('chat-message', message); bound?.off('dm-message', message);
+      bound = socket; bound?.on('peer-joined', joined); bound?.on('peer-left', left); bound?.on('chat-message', message); bound?.on('dm-message', message);
+    }
+    if (lastRoom !== currentRoomCode) {
+      lastRoom = currentRoomCode;
+      if (lastRoom && currentRoomType === 'room') write('recent', [lastRoom, ...read('recent', []).filter(code => code !== lastRoom)].slice(0, 5));
+      settings.querySelector('#social-recent').replaceChildren(...read('recent', []).map(code => {
+        const btn = document.createElement('button'); btn.className = 'btn btn-ghost'; btn.textContent = code;
+        btn.onclick = () => { if (!currentRoomCode || confirm('Mevcut görüşmeden ayrıl?')) joinRoomWithCode(code); }; return btn;
+      }));
+    }
+    document.querySelectorAll('#friends-list .friend-row').forEach(row => {
+      if (row.querySelector('.social-favorite')) return;
+      const name = row.querySelector('.name')?.textContent; if (!name) return;
+      const btn = document.createElement('button'); btn.className = 'btn btn-ghost social-favorite';
+      const update = () => { const active = read('favorites', []).includes(name); btn.textContent = active ? '★' : '☆'; btn.setAttribute('aria-label', name + ' favori'); btn.setAttribute('aria-pressed', String(active)); row.style.order = active ? '-1' : '0'; };
+      btn.onclick = () => { const names = read('favorites', []); write('favorites', names.includes(name) ? names.filter(n => n !== name) : [...names, name]); update(); };
+      update(); row.append(btn);
+    });
+  }, 750);
+})();

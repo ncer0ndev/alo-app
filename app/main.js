@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, globalShortcut, shell, dialog, Menu, Tray, Notification } = require('electron');
+const { app, BrowserWindow, ipcMain, globalShortcut, shell, dialog, Menu, Tray, Notification, desktopCapturer, session } = require('electron');
 const { autoUpdater } = require('electron-updater');
 const { setupUpdater } = require('./updater');
 const path = require('path');
@@ -218,6 +218,17 @@ function runApp() {
   }
 
   app.whenReady().then(() => {
+    session.defaultSession.setDisplayMediaRequestHandler(async (_request, callback) => {
+      try {
+        const sources = await desktopCapturer.getSources({ types: ['screen', 'window'] });
+        const result = await dialog.showMessageBox(mainWindow, {
+          title: 'Ekran paylaş', message: 'Paylaşılacak ekranı veya pencereyi seç',
+          buttons: ['Vazgeç', ...sources.map(source => source.name)], cancelId: 0,
+        });
+        const source = sources[result.response - 1];
+        callback(source ? { video: source, ...(process.platform === 'win32' ? { audio: 'loopback' } : {}) } : {});
+      } catch { callback({}); }
+    });
     createWindow();
     updaterCtl = setupUpdater({ app, autoUpdater, dialog, Menu, getWindow: () => mainWindow });
     createTray();

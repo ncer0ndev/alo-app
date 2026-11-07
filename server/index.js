@@ -1951,6 +1951,10 @@ io.on('connection', (socket) => {
     if (!socket.data.currentRoom) return;
     const room = rooms.get(socket.data.currentRoom);
     if (room) {
+      if (room.screenOwner === socket.id) {
+        room.screenOwner = null;
+        io.to(socket.data.currentRoom).emit('screen-owner', { id: null });
+      }
       room.members.delete(socket.id);
       publishServerChannelCount(room);
       socket.to(socket.data.currentRoom).emit('peer-left', { id: socket.id });
@@ -2212,6 +2216,29 @@ io.on('connection', (socket) => {
       console.error('join-friend-room hatasi:', err.message);
       ack({ error: 'sunucu hatasi' });
     });
+  });
+
+  socket.on('screen-control', (payload, ack = () => {}) => {
+    if (typeof ack !== 'function') ack = () => {};
+    const room = rooms.get(socket.data.currentRoom);
+    if (!room || !room.members.has(socket.id)) return ack({ error: 'Önce bir ses kanalına katıl.' });
+    if (payload?.action === 'state') return ack({ id: room.screenOwner || null });
+    if (payload?.action === 'start') {
+      if (room.screenOwner && room.screenOwner !== socket.id) return ack({ error: 'Başka bir kullanıcı ekran paylaşıyor.' });
+      room.screenOwner = socket.id;
+    } else if (payload?.action === 'stop' && room.screenOwner === socket.id) room.screenOwner = null;
+    else return ack({ error: 'Geçersiz paylaşım isteği.' });
+    io.to(socket.data.currentRoom).emit('screen-owner', { id: room.screenOwner });
+    ack({ ok: true });
+  });
+
+  socket.on('screen-signal', (payload) => {
+    const room = rooms.get(socket.data.currentRoom);
+    const { to, data } = payload || {};
+    if (!room || !room.members.has(socket.id) || !room.members.has(to)) return;
+    if (socket.id !== room.screenOwner && to !== room.screenOwner) return;
+    if (!isValidSignalData(data) && data?.request !== true) return;
+    io.to(to).emit('screen-signal', { from: socket.id, data });
   });
 
   socket.on('signal', (payload) => {
@@ -2521,6 +2548,8 @@ io.on('connection', (socket) => {
     }
   });
 });
+
+require('./friend-groups')({ app, auth: requireAuth, limiter: friendLimiter, route: asyncRoute, db, createRoomEntry, rooms });
 
 const PORT = process.env.PORT || 3000;
 

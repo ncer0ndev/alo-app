@@ -1,0 +1,17 @@
+const common = [
+  'CREATE TABLE IF NOT EXISTS social_profiles (user_id INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE, about TEXT NOT NULL, presence TEXT NOT NULL, expires_at BIGINT NOT NULL)',
+  'CREATE TABLE IF NOT EXISTS friend_group_members (group_id INTEGER NOT NULL REFERENCES friend_groups(id) ON DELETE CASCADE, user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE, PRIMARY KEY(group_id,user_id))',
+];
+module.exports = {
+  name: '0005_friend_groups',
+  sqlite: [
+    'CREATE TABLE IF NOT EXISTS friend_groups (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, owner_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE)',
+    ...common,
+    'CREATE TABLE IF NOT EXISTS friend_group_messages (id INTEGER PRIMARY KEY AUTOINCREMENT, group_id INTEGER NOT NULL REFERENCES friend_groups(id) ON DELETE CASCADE, user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE, text TEXT NOT NULL, created_at INTEGER NOT NULL)',
+  ],
+  postgres: [
+    'CREATE TABLE IF NOT EXISTS friend_groups (id INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY, name TEXT NOT NULL, owner_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE)',
+    ...common,
+    'CREATE TABLE IF NOT EXISTS friend_group_messages (id INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY, group_id INTEGER NOT NULL REFERENCES friend_groups(id) ON DELETE CASCADE, user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE, text TEXT NOT NULL, created_at BIGINT NOT NULL)',
+  ],
+};

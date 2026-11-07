@@ -291,6 +291,10 @@ const peerConnections = {};
 const audioElements = {};
 const participantNames = {};
 const participantVolumes = {};
+function savedParticipantVolume(name) {
+  const value = Number(localStorage.getItem(`alo-volume:${getSession().username}:${name}`) ?? 100);
+  return Number.isFinite(value) ? Math.max(0, Math.min(100, value)) : 100;
+}
 
 function getPeerIdForUsername(username) {
   return Object.keys(participantNames).find((id) => participantNames[id] === username);
@@ -298,7 +302,10 @@ function getPeerIdForUsername(username) {
 
 function applyParticipantVolume(id, name) {
   const audio = audioElements[id];
-  if (audio) audio.volume = (participantVolumes[name] ?? 100) / 100;
+  if (audio) {
+    audio.volume = (participantVolumes[name] ?? savedParticipantVolume(name)) / 100;
+    audio.muted = localStorage.getItem(`alo-muted:${getSession().username}:${name}`) === 'true';
+  }
 }
 const pendingCandidates = {};
 const peerAnalysers = {};
@@ -369,6 +376,8 @@ function clearSession() {
 }
 
 function getSettings() {
+  let doNotDisturb = false;
+  try { doNotDisturb = JSON.parse(localStorage.getItem(`alo:${getSession().username || 'guest'}:dnd`)) === true; } catch {}
   return {
     micMode: localStorage.getItem('micMode') || 'always',
     pttKey: localStorage.getItem('pttKey') || 'Space',
@@ -376,12 +385,12 @@ function getSettings() {
     micDeviceId: localStorage.getItem('micDeviceId') || '',
     speakerDeviceId: localStorage.getItem('speakerDeviceId') || '',
     runInBackground: localStorage.getItem('runInBackground') === 'true',
-    notifyIncomingCall: localStorage.getItem('notifyIncomingCall') !== 'false',
+    notifyIncomingCall: !doNotDisturb && localStorage.getItem('notifyIncomingCall') !== 'false',
     notifyFriendRequest: localStorage.getItem('notifyFriendRequest') !== 'false',
-    notifyChatMessage: localStorage.getItem('notifyChatMessage') === 'true',
-    notifyDmMessage: localStorage.getItem('notifyDmMessage') !== 'false',
+    notifyChatMessage: !doNotDisturb && localStorage.getItem('notifyChatMessage') === 'true',
+    notifyDmMessage: !doNotDisturb && localStorage.getItem('notifyDmMessage') !== 'false',
     notifyChatContent: localStorage.getItem('notifyChatContent') === 'true',
-    ringtoneEnabled: localStorage.getItem('ringtoneEnabled') !== 'false',
+    ringtoneEnabled: !doNotDisturb && localStorage.getItem('ringtoneEnabled') !== 'false',
     ringtoneVolume: Number(localStorage.getItem('ringtoneVolume') ?? '70'),
     ringtoneStyle: localStorage.getItem('ringtoneStyle') || 'chime',
     gameDetectionEnabled: localStorage.getItem('gameDetectionEnabled') === 'true',
@@ -1462,22 +1471,24 @@ function renderParticipants() {
     vol.type = 'range';
     vol.min = '0';
     vol.max = '100';
-    vol.value = String(participantVolumes[name] ?? 100);
+    vol.value = String(participantVolumes[name] ?? savedParticipantVolume(name));
     vol.className = 'volume-slider';
     vol.setAttribute('aria-label', `${name} ses seviyesi`);
     vol.oninput = () => {
       participantVolumes[name] = Number(vol.value);
+      localStorage.setItem(`alo-volume:${getSession().username}:${name}`, vol.value);
       applyParticipantVolume(id, name);
     };
     applyParticipantVolume(id, name);
 
     const muteOneBtn = document.createElement('button');
     muteOneBtn.className = 'btn btn-ghost';
-    muteOneBtn.textContent = '[ SUSTUR ]';
+    muteOneBtn.textContent = audioElements[id]?.muted ? '[ SESİ AÇ ]' : '[ SUSTUR ]';
     muteOneBtn.onclick = () => {
       const audio = audioElements[id];
       if (!audio) return;
       audio.muted = !audio.muted;
+      localStorage.setItem(`alo-muted:${getSession().username}:${name}`, String(audio.muted));
       muteOneBtn.textContent = audio.muted ? '[ SESİ AÇ ]' : '[ SUSTUR ]';
     };
 
@@ -2274,11 +2285,12 @@ function renderVoiceChannelMembers(row, members) {
       vol.type = 'range';
       vol.min = '0';
       vol.max = '100';
-      vol.value = String(participantVolumes[m.username] ?? 100);
+      vol.value = String(participantVolumes[m.username] ?? savedParticipantVolume(m.username));
       vol.className = 'volume-slider';
       vol.setAttribute('aria-label', `${m.username} ses seviyesi`);
       vol.oninput = () => {
         participantVolumes[m.username] = Number(vol.value);
+        localStorage.setItem(`alo-volume:${getSession().username}:${m.username}`, vol.value);
         applyParticipantVolume(getPeerIdForUsername(m.username), m.username);
       };
       if (peerId) applyParticipantVolume(peerId, m.username);
