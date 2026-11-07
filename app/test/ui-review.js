@@ -23,7 +23,7 @@ document.getElementById('run').onclick = async () => {
     await clickTab('friends');
     const nav = d.querySelector('.tab-bar').getBoundingClientRect();
     const panel = d.querySelector('#tab-friends').getBoundingClientRect();
-    check(panel.left >= nav.right - 1 && fits('#tab-friends'), `${width}: menü ve içerik yan yana`);
+    check(nav.left >= panel.right - 1 && fits('#tab-friends'), `${width}: çalışma alanı menüsü sağda`);
     const friendsTab = d.querySelector('[data-tab="friends"]');
     friendsTab.focus();
     friendsTab.dispatchEvent(new w.KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true }));

@@ -20,6 +20,18 @@
   dock.setAttribute('aria-label', 'Sesli görüşme kontrolleri');
   dock.innerHTML = '<div class="voice-dock-title"><span class="voice-dock-dot">●</span><strong></strong></div><div class="voice-dock-actions"><button type="button" class="btn btn-ghost" data-action="mute">Mikrofon</button><button type="button" class="btn btn-ghost" data-action="share">Ekran paylaş</button><button type="button" class="btn btn-ghost" data-action="leave">Ayrıl</button></div>';
   document.body.append(dock);
+  const dockToggle = document.createElement('button');
+  dockToggle.type = 'button'; dockToggle.className = 'voice-dock-toggle';
+  dockToggle.setAttribute('aria-label', 'Görüşme kontrollerini gizle');
+  dockToggle.setAttribute('aria-expanded', 'true');
+  dockToggle.textContent = '−';
+  dock.querySelector('.voice-dock-title').append(dockToggle);
+  dockToggle.onclick = () => {
+    const collapsed = dock.classList.toggle('voice-dock-collapsed');
+    dockToggle.textContent = collapsed ? '+' : '−';
+    dockToggle.setAttribute('aria-expanded', String(!collapsed));
+    dockToggle.setAttribute('aria-label', collapsed ? 'Görüşme kontrollerini aç' : 'Görüşme kontrollerini gizle');
+  };
   dock.querySelector('[data-action=mute]').onclick = () => document.querySelector('#mute-btn').click();
   dock.querySelector('[data-action=leave]').onclick = () => document.querySelector('#leave-btn').click();
   dock.querySelector('[data-action=share]').onclick = () => button.click();
