@@ -1,6 +1,21 @@
 (() => {
   if (window.api || !/^https?:$/.test(location.protocol)) return;
   document.documentElement.classList.add('web-client');
+  const mobileInfo = document.createElement('section'); mobileInfo.className = 'social-tools';
+  const mobileVersion = document.createElement('p'); mobileVersion.textContent = 'Mobil sürüm: 2026.11.07-b';
+  const permissionHelp = document.createElement('p');
+  permissionHelp.textContent = 'Mikrofon izni her görüşmede soruluyorsa Safari → Sayfa menüsü → Web Sitesi Ayarları → Mikrofon → İzin Ver seç. Site verilerini temizlemek veya özel gezinmek bu tercihi sıfırlayabilir. Ekran paylaşımı için her seferinde sistem onayı gerekir.';
+  const shareDiagnostic = document.createElement('p'); shareDiagnostic.setAttribute('role', 'status');
+  shareDiagnostic.textContent = sessionStorage.getItem('alo-last-share-state') || 'Henüz ekran paylaşımı denenmedi.';
+  mobileInfo.append(mobileVersion, permissionHelp, shareDiagnostic);
+  document.querySelector('#tab-settings').append(mobileInfo);
+  document.addEventListener('alo-share-state', event => {
+    const labels = { 'device-ended': 'Ekran yakalama cihaz/tarayıcı tarafından sonlandırıldı.', 'user-stop': 'Paylaşım durdurma düğmesiyle kapatıldı.', 'room-or-owner-change': 'ALO, oda veya paylaşan kişi değiştiği için yakalamayı kapattı.', 'connection-paused': 'Bağlantı kesildi; ALO ekran yakalamayı kapatmadı.' };
+    const text = labels[event.detail?.reason];
+    if (!text) return;
+    shareDiagnostic.textContent = text + (event.detail.hidden ? ' ALO arka plandaydı.' : ' ALO ön plandaydı.');
+    sessionStorage.setItem('alo-last-share-state', shareDiagnostic.textContent);
+  });
   // Native Safari controls offer its own PiP/fullscreen affordances where supported.
   const sharedVideo = document.querySelector('#shared-screen');
   if (sharedVideo) sharedVideo.controls = true;

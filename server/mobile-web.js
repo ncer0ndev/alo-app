@@ -12,7 +12,8 @@ module.exports = function mobileWeb() {
     const file = req.path.replace(/^\//, '') || 'index.html';
     const asset = /^(assets|fonts|vendor)\/[a-zA-Z0-9_./-]+\.(png|jpg|jpeg|ico|webp|mp3|woff2?|css|js)$/.test(file) && !file.split('/').includes('..');
     if (!publicFiles.has(file) && !asset) return res.sendStatus(404);
-    if (file === 'sw.js' || file === 'index.html') res.setHeader('Cache-Control', 'no-cache');
+    // Mobile home-screen apps must revalidate every frontend release.
+    res.setHeader('Cache-Control', 'no-store');
     res.setHeader('X-Content-Type-Options', 'nosniff');
     next();
   });

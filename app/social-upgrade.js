@@ -108,7 +108,11 @@
     for (const pc of peers.values()) pc.close();
     peers.clear(); candidates.clear(); video.srcObject = null; video.hidden = true;
   }
-  function stop(notify = true) {
+  function reportShareState(reason) {
+    document.dispatchEvent(new CustomEvent('alo-share-state', { detail: { reason, hidden: document.hidden } }));
+  }
+  function stop(notify = true, reason = notify ? 'user-stop' : 'room-or-owner-change') {
+    if (stream) reportShareState(reason);
     recoveringShare = false;
     quality.disabled = false;
     if (stream) { const old = stream; stream = null; old.getTracks().forEach(track => track.stop()); }
@@ -118,6 +122,7 @@
   function suspendShareTransport() {
     if (!boundRoom || !stream || recoveringShare) return;
     recoveringShare = true;
+    reportShareState('connection-paused');
     clearPeers(); video.srcObject = stream; video.muted = true; video.hidden = false;
     status.textContent = 'Bağlantı bekleniyor. Ekran yakalama açık tutuluyor; paylaşımı durdurabilirsin.';
   }
@@ -185,7 +190,7 @@
       const captureTrack = captured.getVideoTracks()[0];
       captureTrack.onended = () => {
         if (stream !== captured) return;
-        stop();
+        stop(true, 'device-ended');
         status.textContent = 'Cihaz ekran yakalamayı sonlandırdı. Yeniden paylaşmak için Ekran paylaş düğmesine dokun.';
       };
       captureTrack.onmute = () => { if (stream === captured) status.textContent = 'Cihaz ekran görüntüsünü duraklattı. Yayın izni korunuyor; ALO’ya dönünce tekrar kontrol edilecek.'; };
