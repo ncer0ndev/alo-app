@@ -666,22 +666,15 @@ function initSettingsTab() {
   populateDeviceLists();
 }
 
-async function ensureMicPermission() {
-  try {
-    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-    stream.getTracks().forEach((t) => t.stop());
-  } catch {
-    // izin verilmemis olabilir; enumerateDevices yine calisir ama etiketler bos gelir
-  }
-}
-
 async function populateDeviceLists() {
-  await ensureMicPermission();
-  const devices = await navigator.mediaDevices.enumerateDevices();
+  // Listing settings must not open the microphone or trigger a new prompt.
+  // Actual capture is requested only by the setup, mic test or call actions.
+  const devices = await navigator.mediaDevices.enumerateDevices().catch(() => []);
   const settings = getSettings();
 
   const mics = devices.filter((d) => d.kind === 'audioinput');
   micSelect.innerHTML = '';
+  micSelect.appendChild(new Option('Sistem varsayılanı', ''));
   mics.forEach((d, i) => {
     const opt = document.createElement('option');
     opt.value = d.deviceId;
@@ -692,6 +685,7 @@ async function populateDeviceLists() {
 
   const speakers = devices.filter((d) => d.kind === 'audiooutput');
   speakerSelect.innerHTML = '';
+  speakerSelect.appendChild(new Option('Sistem varsayılanı', ''));
   speakers.forEach((d, i) => {
     const opt = document.createElement('option');
     opt.value = d.deviceId;
@@ -4231,8 +4225,13 @@ function connectSocket() {
 
 async function rejoinAfterReconnect() {
   const roomCode = currentRoomCode;
+  if (!roomCode) return;
   cleanupAllPeers();
-  const result = await joinRoomAck(roomCode);
+  const channelMatch = currentRoomType === 'server-channel' && /^CH(\d+)$/.exec(roomCode);
+  const result = channelMatch
+    ? await emitWithTimeout('join-server-channel', { channelId: Number(channelMatch[1]) })
+    : await joinRoomAck(roomCode);
+  if (currentRoomCode !== roomCode) return;
   if (!result || result.error) {
     showToast('Görüşmeye yeniden bağlanılamadı. Devam etmek için kanala veya odaya tekrar katıl.', 'error', 5000);
     currentRoomCode = null;
@@ -4241,6 +4240,7 @@ async function rejoinAfterReconnect() {
   }
   renderParticipants();
   applyChatHistory(result.chatHistory);
+  document.dispatchEvent(new CustomEvent('alo-room-rejoined'));
   for (const peer of result.existingPeers) {
     addParticipant(peer.id, peer.displayName, peer.avatarId);
     await callPeer(peer.id);

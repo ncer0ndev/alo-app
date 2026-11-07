@@ -101,6 +101,7 @@
   let boundSocket = null;
   let boundRoom = null;
   let starting = false;
+  let recoveringShare = false;
   const peers = new Map();
   const candidates = new Map();
   function clearPeers() {
@@ -108,10 +109,17 @@
     peers.clear(); candidates.clear(); video.srcObject = null; video.hidden = true;
   }
   function stop(notify = true) {
+    recoveringShare = false;
     quality.disabled = false;
     if (stream) { const old = stream; stream = null; old.getTracks().forEach(track => track.stop()); }
     clearPeers(); button.textContent = 'Ekran paylaş';
     if (notify && boundSocket?.connected) boundSocket.emit('screen-control', { action: 'stop' }, () => {});
+  }
+  function suspendShareTransport() {
+    if (!boundRoom || !stream || recoveringShare) return;
+    recoveringShare = true;
+    clearPeers(); video.srcObject = stream; video.muted = true; video.hidden = false;
+    status.textContent = 'Bağlantı bekleniyor. Ekran yakalama açık tutuluyor; paylaşımı durdurabilirsin.';
   }
   function connection(id) {
     if (peers.has(id)) return peers.get(id);
@@ -174,7 +182,14 @@
       if (result?.error) { captured.getTracks().forEach(track => track.stop()); throw new Error(result.error); }
       stream = captured; video.srcObject = captured; video.muted = true; video.hidden = false;
       quality.disabled = true;
-      captured.getVideoTracks()[0].onended = () => stop();
+      const captureTrack = captured.getVideoTracks()[0];
+      captureTrack.onended = () => {
+        if (stream !== captured) return;
+        stop();
+        status.textContent = 'Cihaz ekran yakalamayı sonlandırdı. Yeniden paylaşmak için Ekran paylaş düğmesine dokun.';
+      };
+      captureTrack.onmute = () => { if (stream === captured) status.textContent = 'Cihaz ekran görüntüsünü duraklattı. Yayın izni korunuyor; ALO’ya dönünce tekrar kontrol edilecek.'; };
+      captureTrack.onunmute = () => { if (stream === captured) status.textContent = 'Ekranın paylaşılıyor'; };
       button.textContent = 'Paylaşımı durdur'; status.textContent = 'Ekranın paylaşılıyor';
     } catch (error) { stop(); status.textContent = error.message || 'Paylaşım başlatılamadı.'; }
     finally { starting = false; }
@@ -250,6 +265,15 @@
     panel.classList.add('share-expanded'); closeExpanded.hidden = false;
     video.play().catch(() => {});
   };
+  document.addEventListener('alo-room-rejoined', () => {
+    if (!recoveringShare || !stream || !boundSocket?.connected) return;
+    const captured = stream;
+    boundSocket.emit('screen-control', { action: 'start' }, result => {
+      if (stream !== captured) return;
+      if (result?.error) { stop(false); status.textContent = 'Paylaşım yeniden bağlanamadı. Ekran paylaş düğmesiyle tekrar dene.'; }
+      else { recoveringShare = false; status.textContent = 'Ekran paylaşımı yeniden bağlandı'; }
+    });
+  });
   setInterval(() => {
     const inCommunityCall = !!currentRoomCode && currentRoomType === 'server-channel';
     dock.hidden = !inCommunityCall;
@@ -266,13 +290,18 @@
     communityShareButton.textContent = stream ? 'Paylaşımı durdur' : 'Ekran paylaş';
     if (socket !== boundSocket) {
       boundSocket?.off('screen-signal', signal); boundSocket?.off('screen-owner', ownerChanged);
+      boundSocket?.off('disconnect', suspendShareTransport);
       stop(false); boundSocket = socket; boundRoom = null;
       boundSocket?.on('screen-signal', signal); boundSocket?.on('screen-owner', ownerChanged);
+      boundSocket?.on('disconnect', suspendShareTransport);
     }
-    if (currentRoomCode !== boundRoom || (!socket?.connected && boundRoom)) {
+    if (currentRoomCode !== boundRoom) {
       stop(false); boundRoom = currentRoomCode;
-      if (!socket?.connected) boundRoom = null;
       if (boundRoom && socket?.connected) socket.emit('screen-control', { action: 'state' }, ownerChanged);
+    }
+    if (!socket?.connected && boundRoom && stream && !recoveringShare) {
+      // A transient signalling disconnect must not stop the OS capture session.
+      suspendShareTransport();
     }
   }, 500);
 })();
