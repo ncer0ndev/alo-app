@@ -44,8 +44,7 @@ test('download never installs without explicit restart choice', async () => {
 });
 
 test('concurrent checks do not start duplicate downloads', async () => {
-  if (process.platform !== 'win32' && process.platform !== 'darwin') return;
-  const f = fixture();
+  const f = fixture(true, 'win32');
   let release;
   let requests = 0;
   f.updater.checkForUpdates = () => { requests++; return new Promise(resolve => { release = resolve; }); };
@@ -58,8 +57,7 @@ test('concurrent checks do not start duplicate downloads', async () => {
 });
 
 test('network errors are quiet in background and retryable', async () => {
-  if (process.platform !== 'win32' && process.platform !== 'darwin') return;
-  const f = fixture();
+  const f = fixture(true, 'win32');
   f.updater.checkForUpdates = async () => { throw new Error('offline'); };
   await f.controller.check();
   assert.equal(f.messages.length, 0);
