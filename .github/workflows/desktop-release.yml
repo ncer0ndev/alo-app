@@ -65,6 +65,10 @@ jobs:
           for (const name of ['latest.yml', 'latest-mac.yml']) {
             const metadata = fs.readFileSync('release-assets/' + name, 'utf8');
             if (!metadata.split(/\r?\n/).includes('version: ' + version)) throw Error('Metadata version mismatch: ' + name);
+            for (const match of metadata.matchAll(/^\s*(?:-\s*)?(?:url|path):\s*(.+)$/gm)) {
+              const asset = decodeURIComponent(match[1].trim().replace(/^['"]|['"]$/g, ''));
+              if (!files.includes(asset)) throw Error('Update metadata references a missing asset: ' + asset);
+            }
           }
           for (const extension of ['.exe', '.exe.blockmap', '.dmg', '.zip']) {
             if (!files.some(name => name.includes(version) && name.endsWith(extension))) throw Error('Missing package: ' + extension);

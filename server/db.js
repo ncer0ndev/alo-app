@@ -401,7 +401,10 @@ async function listAllUsers() {
 }
 
 async function setPasswordHash(userId, passwordHash) {
-  await adapter.query({ sql: 'UPDATE users SET password_hash = ? WHERE id = ?', args: [passwordHash, userId] });
+  await adapter.batch([
+    { sql: 'UPDATE users SET password_hash = ?, auth_version = auth_version + 1, recovery_version = recovery_version + 1 WHERE id = ?', args: [passwordHash, userId] },
+    { sql: 'DELETE FROM account_tokens WHERE user_id = ?', args: [userId] },
+  ]);
 }
 
 async function setStatusMessage(userId, statusMessage) {

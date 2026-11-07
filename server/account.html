@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="tr"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="referrer" content="no-referrer"><title>ALO — Hesap kurtarma</title>
+<style>body{margin:0;background:#101316;color:#f4f5f7;font:15px system-ui;display:grid;min-height:100dvh;place-items:center}main{box-sizing:border-box;width:min(440px,92vw);padding:28px;background:#191e24;border:1px solid #353d47;border-radius:18px}h1{font-size:24px}p{color:#c3cbd5;line-height:1.6}label{display:block;margin:18px 0}input,button{box-sizing:border-box;width:100%;padding:12px;border-radius:8px;font:inherit}input{margin-top:8px;background:#101316;color:white;border:1px solid #586372}button{border:0;background:#b7f454;color:#17220a;cursor:pointer}button:disabled{opacity:.5}a{color:#b7f454}</style>
+<main><h1 id="title">Hesap kurtarma</h1><p id="help"></p><form><label id="password-label">Yeni şifre<input id="password" type="password" autocomplete="new-password" minlength="6" maxlength="72" required></label><label id="confirm-label">Yeni şifre tekrar<input id="confirm" type="password" autocomplete="new-password" minlength="6" maxlength="72" required></label><button id="submit">Devam et</button></form><p id="status" role="status" aria-live="polite"></p><a href="/mobile/">ALO’ya dön</a></main>
+<script>
+const params = new URLSearchParams(location.hash.slice(1));
+const token = params.get('token'), action = params.get('action');
+history.replaceState(null, '', location.pathname);
+const form = document.querySelector('form'), status = document.querySelector('#status'), button = document.querySelector('#submit');
+if (!['reset','verify'].includes(action) || !/^[a-f0-9]{64}$/.test(token || '')) { form.hidden = true; status.textContent = 'Bağlantı geçersiz. ALO’dan yeni bağlantı iste.'; }
+else {
+  document.querySelector('#title').textContent = action === 'verify' ? 'E-postanı doğrula' : 'Yeni şifreni belirle';
+  document.querySelector('#help').textContent = action === 'verify' ? 'E-posta adresini hesabına bağlamak için aşağıdaki düğmeye bas.' : 'Şifreni değiştirince tüm eski oturumların kapatılır.';
+  if (action === 'verify') { for (const id of ['password-label','confirm-label']) document.getElementById(id).remove(); button.textContent = 'E-posta adresimi doğrula'; }
+  form.onsubmit = async event => {
+    event.preventDefault();
+    const password = document.querySelector('#password')?.value;
+    if (action === 'reset' && password !== document.querySelector('#confirm').value) { status.textContent = 'Şifreler eşleşmiyor.'; return; }
+    button.disabled = true; status.textContent = 'İşlem yapılıyor…';
+    try {
+      const response = await fetch('/api/account/' + action, { method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({ token,password }) });
+      const data = await response.json(); if (!response.ok) throw Error(data.error || 'İşlem tamamlanamadı.');
+      status.textContent = data.message; form.remove();
+    } catch(error) { status.textContent = error.message || 'Bağlantını kontrol edip tekrar dene.'; button.disabled = false; }
+  };
+}
+</script></html>

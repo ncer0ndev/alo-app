@@ -377,10 +377,12 @@ const loginLimiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 20, standardHead
 const registerLimiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 200, standardHeaders: true, legacyHeaders: false });
 const friendLimiter = rateLimit({ windowMs: 60 * 1000, max: 30, standardHeaders: true, legacyHeaders: false });
 
-function requireAuth(req, res, next) {
+async function requireAuth(req, res, next) {
   const token = (req.headers.authorization || '').replace('Bearer ', '');
   try {
     const payload = jwt.verify(token, JWT_SECRET);
+    const user = await db.getUserById(payload.userId);
+    if (!user || (payload.authVersion || 0) !== Number(user.auth_version || 0)) return res.status(401).json({ error: 'Oturumun sona erdi. Tekrar giriş yap.' });
     req.userId = payload.userId;
     req.username = payload.username;
     next();
@@ -403,6 +405,10 @@ function requireAdmin(req, res, next) {
   next();
 }
 
+require('./account-recovery').mountRecovery(app, { db, requireAuth, invalidateSessions(userId) {
+  for (const socket of io.sockets.sockets.values()) if (Number(socket.data.userId) === userId) socket.disconnect(true);
+} });
+app.get('/account', (_req, res) => res.sendFile(require('path').join(__dirname, 'account.html')));
 app.get('/', (_req, res) => res.send('Sesli sohbet sinyalleşme sunucusu çalışıyor.'));
 
 app.post(
@@ -445,7 +451,7 @@ app.post(
     if (!user || !bcrypt.compareSync(password, user.password_hash)) {
       return res.status(401).json({ error: 'kullanici adi veya sifre hatali' });
     }
-    const token = jwt.sign({ userId: user.id, username: user.username }, JWT_SECRET, { expiresIn: '30d' });
+    const token = jwt.sign({ userId: user.id, username: user.username, authVersion: Number(user.auth_version || 0) }, JWT_SECRET, { expiresIn: '30d' });
     res.json({ token, username: user.username });
   })
 );
@@ -1921,7 +1927,7 @@ io.use(async (socket, next) => {
   try {
     const payload = jwt.verify(token, JWT_SECRET);
     const user = await db.getUserById(payload.userId);
-    if (!user) return next(new Error('unauthorized'));
+    if (!user || (payload.authVersion || 0) !== Number(user.auth_version || 0)) return next(new Error('unauthorized'));
     socket.data.userId = payload.userId;
     socket.data.username = user.username;
     socket.data.avatarId = publicAvatar(user);

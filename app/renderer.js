@@ -556,6 +556,11 @@ function logout() {
 // ---- sekmeler ----
 
 function showTab(tabName) {
+  // Header shortcuts are also visible outside the home workspace.
+  if (tabName === 'settings' || tabName === 'profile') {
+    if (!communityArea.classList.contains('hidden')) enterHomeMode();
+    showScreen(joinScreen);
+  }
   tabBtns.forEach((btn) => {
     const selected = btn.dataset.tab === tabName;
     btn.classList.toggle('active', selected);

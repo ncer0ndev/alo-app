@@ -4,7 +4,7 @@ const publicFiles = new Set([
   'index.html', 'manifest.webmanifest', 'sw.js', 'offline.html',
   'styles.css', 'modern-ui.css', 'social-upgrade.css', 'mobile.css', 'avatars.css',
   'theme-init.js', 'avatar-catalog.js', 'avatars.js', 'banner-catalog.js', 'banners.js',
-  'experience.js', 'renderer.js', 'modern-ui.js', 'social-upgrade.js', 'setup.js', 'mobile.js',
+  'experience.js', 'renderer.js', 'modern-ui.js', 'social-upgrade.js', 'setup.js', 'mobile.js', 'account.js',
 ]);
 module.exports = function mobileWeb() {
   const router = express.Router();

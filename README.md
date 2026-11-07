@@ -161,3 +161,28 @@ Yayınlanmış sürüm numarası tekrar kullanılmaz.
 Windows güncellemeyi uygulama içinden indirir ve onayla kurar.
 Apple imzası olmayan Mac sürümünde güncelleme düğmesi indirme sayfasını açar;
 DMG içindeki uygulama Uygulamalar klasöründeki eski sürümün yerine kopyalanır.
+
+### E-posta doğrulama ve şifre sıfırlama
+
+Eski hesaplar **Ayarlar → E-posta ve hesap kurtarma** bölümünden mevcut
+şifrelerini girerek adres ekler. Adres, 30 dakikalık tek kullanımlık bağlantıyla
+doğrulanana kadar şifre kurtarmada kullanılmaz. Giriş ekranındaki **Şifremi
+unuttum** düğmesi doğrulanmış adrese bağlantı gönderir. Şifre sıfırlanınca
+eski HTTP/Socket oturumları geçersiz olur ve açık bağlantılar kapatılır.
+
+Sunucuda şu ortam değişkenlerini tanımlayın (anahtarı repoya eklemeyin):
+- `RESEND_API_KEY`: Resend gönderim anahtarı.
+- `MAIL_FROM`: Resend üzerinde doğrulanmış alan adınızdan gönderen adresi.
+- `PUBLIC_APP_URL`: Kullanıcıların erişebildiği HTTPS sunucu adresi,
+  örneğin `https://alo-app.onrender.com`.
+
+Resend hesabında alan adını ekleyin, verilen DNS kayıtlarını alan adı
+sağlayıcısında tanımlayıp doğrulayın; ardından gönderim anahtarı oluşturun.
+Üç değişkeni Render Environment bölümüne ekleyip sunucuyu yeniden başlatın.
+Bağlantı sayfası `/account/` adresindedir; masaüstü uygulamasının kurulu
+olması gerekmez. Bağlantı anahtarı URL parçasında taşınır, sayfa açılınca
+adres çubuğundan kaldırılır ve yalnızca kullanıcı onayladığında gönderilir.
+
+Ayarlar eksikse gönderim açık bir mesajla kapalı tutulur. API yanıtları veya
+sunucu kayıtları doğrulama/sıfırlama anahtarlarını içermez. Otomatik testler
+sahte bir gönderici kullanır; gerçek posta göndermez.
