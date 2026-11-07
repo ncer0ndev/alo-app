@@ -392,7 +392,7 @@ function getSettings() {
     notifyChatContent: localStorage.getItem('notifyChatContent') === 'true',
     ringtoneEnabled: !doNotDisturb && localStorage.getItem('ringtoneEnabled') !== 'false',
     ringtoneVolume: Number(localStorage.getItem('ringtoneVolume') ?? '70'),
-    ringtoneStyle: localStorage.getItem('ringtoneStyle') || 'chime',
+    ringtoneStyle: localStorage.getItem('ringtoneStyle') || 'phone',
     gameDetectionEnabled: localStorage.getItem('gameDetectionEnabled') === 'true',
   };
 }
@@ -1110,6 +1110,7 @@ async function callFriend(toUsername) {
 // ve iki es zamanli sert sinyal, alarm/tatbikat siren tonuna benziyordu.
 
 const RINGTONE_CATALOG = [
+  { id: 'phone', label: 'Telefon zili (varsayılan)', file: 'assets/default-ringtone.mp3' },
   {
     id: 'chime',
     label: 'Nazik Çan',
@@ -1155,6 +1156,8 @@ function getRingtoneStyle() {
 let ringtoneCtx = null;
 let ringtoneGain = null;
 let ringtoneTimer = null;
+let ringtoneAudio = null;
+let ringtonePreviewAudio = null;
 
 function playRingtoneNote(freq, startTime, duration, type) {
   const osc = ringtoneCtx.createOscillator();
@@ -1175,7 +1178,14 @@ function playRingtoneNote(freq, startTime, duration, type) {
 
 function startRingtone() {
   const settings = getSettings();
-  if (!settings.ringtoneEnabled || ringtoneCtx) return;
+  if (!settings.ringtoneEnabled || ringtoneCtx || ringtoneAudio) return;
+  if (getRingtoneStyle().file) {
+    ringtoneAudio = new Audio(getRingtoneStyle().file);
+    ringtoneAudio.loop = true;
+    ringtoneAudio.volume = Math.max(0, Math.min(1, settings.ringtoneVolume / 100));
+    ringtoneAudio.play().catch(() => { stopRingtone(); });
+    return;
+  }
   try {
     ringtoneCtx = new AudioContext();
   } catch {
@@ -1199,6 +1209,16 @@ function startRingtone() {
 }
 
 function previewRingtone(styleId) {
+  if (ringtonePreviewAudio) { ringtonePreviewAudio.pause(); ringtonePreviewAudio = null; }
+  const selected = RINGTONE_CATALOG.find(style => style.id === styleId);
+  if (selected?.file) {
+    const audio = new Audio(selected.file);
+    ringtonePreviewAudio = audio;
+    audio.volume = Math.max(0, Math.min(1, getSettings().ringtoneVolume / 100));
+    audio.play().catch(() => {});
+    setTimeout(() => { audio.pause(); if (ringtonePreviewAudio === audio) ringtonePreviewAudio = null; }, 5000);
+    return;
+  }
   let ctx;
   try {
     ctx = new AudioContext();
@@ -1231,6 +1251,7 @@ function previewRingtone(styleId) {
 }
 
 function stopRingtone() {
+  if (ringtoneAudio) { ringtoneAudio.pause(); ringtoneAudio.currentTime = 0; ringtoneAudio = null; }
   if (ringtoneTimer) {
     clearInterval(ringtoneTimer);
     ringtoneTimer = null;
@@ -4862,6 +4883,9 @@ ringtoneEnabledCheckbox.addEventListener('change', () => {
 
 ringtoneVolumeSlider.addEventListener('input', () => {
   saveSetting('ringtoneVolume', ringtoneVolumeSlider.value);
+  const volume = Math.max(0, Math.min(1, Number(ringtoneVolumeSlider.value) / 100));
+  if (ringtoneAudio) ringtoneAudio.volume = volume;
+  if (ringtonePreviewAudio) ringtonePreviewAudio.volume = volume;
 });
 
 ringtoneStyleSelect.addEventListener('change', () => {

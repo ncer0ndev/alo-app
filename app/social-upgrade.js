@@ -7,6 +7,14 @@
   const video = panel.querySelector('video');
   const status = panel.querySelector('#share-status');
   const button = panel.querySelector('#share-screen');
+  const communityShareButton = document.createElement('button');
+  communityShareButton.className = 'btn btn-ghost';
+  communityShareButton.textContent = 'Ekran paylaş';
+  document.querySelector('#active-call-bar').append(communityShareButton);
+  communityShareButton.onclick = () => {
+    panel.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    button.click();
+  };
   let stream = null;
   let owner = null;
   let boundSocket = null;
@@ -80,6 +88,12 @@
   video.onclick = () => video.play().catch(() => {});
   panel.querySelector('#share-fullscreen').onclick = () => { if (!video.hidden) video.requestFullscreen().catch(() => {}); };
   setInterval(() => {
+    const target = currentRoomType === 'server-channel' && !document.querySelector('#community-area').classList.contains('hidden')
+      ? document.querySelector('#community-area .community-main') : document.querySelector('#room-screen');
+    if (panel.parentElement !== target) target.append(panel);
+    panel.hidden = !currentRoomCode;
+    communityShareButton.hidden = !currentRoomCode;
+    communityShareButton.textContent = stream ? 'Paylaşımı durdur' : 'Ekran paylaş';
     if (socket !== boundSocket) {
       boundSocket?.off('screen-signal', signal); boundSocket?.off('screen-owner', ownerChanged);
       stop(false); boundSocket = socket; boundRoom = null;
@@ -99,8 +113,56 @@
   section.innerHTML = '<h3>Arkadaş grupları</h3><label>Grup adı<input id="group-name" maxlength="40"></label><label>Arkadaşların (virgülle ayır)<input id="group-members" placeholder="efe, deniz"></label><button class="btn" id="group-create">Grup oluştur</button><div id="group-list"></div><h4 id="group-title"></h4><p id="group-people"></p><div id="group-log" role="log" aria-live="polite"></div><div class="chat-input-row"><textarea id="group-message" maxlength="2000" placeholder="Grup mesajı"></textarea><button class="btn" id="group-send">Gönder</button><button class="btn" id="group-call">Grup aramasına katıl</button></div><p id="group-error" role="status"></p>';
   document.querySelector('#tab-dm').append(section);
   const el = id => section.querySelector('#' + id);
+  // Group creation belongs in a dialog; only the selected thread is shown here.
+  const dialog = document.createElement('dialog');
+  dialog.className = 'social-guide group-create-dialog';
+  dialog.innerHTML = '<h2>Yeni grup</h2><div class="group-form"></div><fieldset class="group-friend-options"><legend>Arkadaşlarını seç</legend></fieldset><p class="group-create-error" role="status"></p><button type="button" class="btn btn-ghost group-cancel">Vazgeç</button>';
+  document.body.append(dialog);
+  const groupName = el('group-name');
+  const createButton = el('group-create');
+  dialog.querySelector('.group-form').append(groupName.closest('label'));
+  el('group-members').closest('label').remove();
+  dialog.append(createButton);
+  section.querySelector('h3').remove();
+  const groupList = el('group-list');
+  groupList.className = 'group-rail-list';
+  document.querySelector('#dm-rail-list').after(groupList);
+  section.hidden = true;
+  const addButton = document.createElement('button');
+  addButton.className = 'member-hover-role-add'; addButton.textContent = '+';
+  addButton.setAttribute('aria-label', 'Grup oluştur');
+  document.querySelector('#dm-rail-list').previousElementSibling.append(addButton);
+  addButton.onclick = async () => {
+    dialog.showModal();
+    const options = dialog.querySelector('.group-friend-options');
+    options.replaceChildren();
+    const legend = document.createElement('legend'); legend.textContent = 'Arkadaşlarını seç'; options.append(legend);
+    try {
+      const data = await request('/api/friends');
+      for (const friend of data.friends) {
+        const label = document.createElement('label'); const checkbox = document.createElement('input');
+        checkbox.type = 'checkbox'; checkbox.value = friend.username;
+        label.append(checkbox, document.createTextNode(friend.username)); options.append(label);
+      }
+      if (!data.friends.length) options.append('Grup oluşturmak için önce bir arkadaş ekle.');
+    } catch (e) { dialog.querySelector('.group-create-error').textContent = e.message; }
+  };
+  dialog.querySelector('.group-cancel').onclick = () => dialog.close();
+  function openGroup(group) {
+    selected = group;
+    enterHomeMode(); showTab('dm');
+    document.querySelector('#dm-list-view').classList.add('hidden');
+    document.querySelector('#dm-thread-view').classList.add('hidden');
+    section.hidden = false;
+    el('group-title').textContent = group.name;
+    messages().catch(error);
+  }
+  document.addEventListener('click', event => {
+    if (event.target.closest('.dm-rail-item, .dm-row, [data-tab], #dm-back-btn, #rail-home-btn')) section.hidden = true;
+  });
   let selected = null;
   let fetching = false;
+  let groupAccount = null;
   const error = e => { el('group-error').textContent = e.message || String(e); };
   async function request(path, body) {
     const res = await fetch(getServerUrl() + path, { method: body ? 'POST' : 'GET', headers: { Authorization: 'Bearer ' + getSession().token, 'Content-Type': 'application/json' }, ...(body ? { body: JSON.stringify(body) } : {}) });
@@ -121,23 +183,31 @@
     if (atBottom) log.scrollTop = log.scrollHeight;
   }
   async function refresh() {
-    if (!getSession().token || fetching || !section.getClientRects().length) return;
+    const account = getSession().username || null;
+    if (account !== groupAccount) {
+      groupAccount = account; selected = null; section.hidden = true; groupList.replaceChildren();
+      el('group-log').replaceChildren();
+    }
+    if (!getSession().token || fetching) return;
     fetching = true;
     try {
       const data = await request('/api/groups');
-      el('group-list').replaceChildren(...data.groups.map(group => {
+      if ((getSession().username || null) !== account) return;
+      groupList.replaceChildren(...data.groups.map(group => {
         const button = document.createElement('button'); button.className = 'btn btn-ghost'; button.textContent = group.name;
-        button.onclick = () => { selected = group; el('group-title').textContent = group.name; messages().catch(error); };
+        button.onclick = () => openGroup(group);
         return button;
       }));
-      await messages();
+      if (!section.hidden) await messages();
     } catch (e) { error(e); } finally { fetching = false; }
   }
-  el('group-create').onclick = async () => {
+  createButton.onclick = async () => {
     try {
-      selected = await request('/api/groups', { name: el('group-name').value, members: el('group-members').value.split(',').map(n => n.trim()).filter(Boolean) });
-      el('group-title').textContent = selected.name; await refresh();
-    } catch (e) { error(e); }
+      createButton.disabled = true;
+      const group = await request('/api/groups', { name: groupName.value, members: [...dialog.querySelectorAll('input[type=checkbox]:checked')].map(input => input.value) });
+      dialog.close(); groupName.value = ''; openGroup(group); await refresh();
+    } catch (e) { dialog.querySelector('.group-create-error').textContent = e.message; }
+    finally { createButton.disabled = false; }
   };
   el('group-send').onclick = async () => {
     if (!selected) return error(new Error('Önce bir grup seç.'));
