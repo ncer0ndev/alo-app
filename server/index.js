@@ -966,6 +966,7 @@ app.post(
     const target = await db.getUserByUsername(targetUsername);
     if (!target) return res.status(404).json({ error: 'kullanici bulunamadi' });
     await db.markDmRead(req.userId, target.id, Date.now());
+    emitToUser(req.username, 'dm-read', { username: target.username });
     res.json({ ok: true });
   })
 );

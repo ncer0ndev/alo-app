@@ -14,6 +14,16 @@
   const picker = document.createElement('dialog'); picker.className = 'screen-picker';
   picker.innerHTML = '<header><h2>Ekranını paylaş</h2><button type="button" class="btn btn-ghost" aria-label="Kapat">×</button></header><p>Paylaşmak istediğin ekranı veya pencereyi seç.</p><nav><button type="button" class="btn" data-source-type="screen">Ekranlar</button><button type="button" class="btn btn-ghost" data-source-type="window">Pencereler</button></nav><div class="screen-source-grid"></div><p class="screen-picker-status" role="status"></p>';
   document.body.append(picker);
+  const audioOption = panel.querySelector('label');
+  picker.querySelector('nav').after(quality, audioOption);
+  const dock = document.createElement('section'); dock.className = 'voice-dock'; dock.hidden = true;
+  dock.setAttribute('aria-label', 'Sesli görüşme kontrolleri');
+  dock.innerHTML = '<div class="voice-dock-title"><span class="voice-dock-dot">●</span><strong></strong></div><div class="voice-dock-actions"><button type="button" class="btn btn-ghost" data-action="mute">Mikrofon</button><button type="button" class="btn btn-ghost" data-action="share">Ekran paylaş</button><button type="button" class="btn btn-ghost" data-action="leave">Ayrıl</button></div>';
+  document.body.append(dock);
+  dock.querySelector('[data-action=mute]').onclick = () => document.querySelector('#mute-btn').click();
+  dock.querySelector('[data-action=leave]').onclick = () => document.querySelector('#leave-btn').click();
+  dock.querySelector('[data-action=share]').onclick = () => button.click();
+  panel.classList.add('screen-floating-preview');
   async function chooseSource() {
     if (!window.api?.screenSources) return true;
     picker.showModal();
@@ -131,7 +141,7 @@
     try {
       if (!await chooseSource()) return;
       const [height, fps] = quality.value.split(':').map(Number);
-      const captured = await navigator.mediaDevices.getDisplayMedia({ video: { width: { ideal: Math.round(height * 16 / 9), max: Math.round(height * 16 / 9) }, height: { ideal: height, max: height }, frameRate: { ideal: fps, max: fps } }, audio: panel.querySelector('#share-audio').checked });
+      const captured = await navigator.mediaDevices.getDisplayMedia({ video: { width: { ideal: Math.round(height * 16 / 9), max: Math.round(height * 16 / 9) }, height: { ideal: height, max: height }, frameRate: { ideal: fps, max: fps } }, audio: audioOption.querySelector('input').checked });
       captured.getVideoTracks()[0].contentHint = fps === 60 ? 'motion' : 'detail';
       stream = captured;
       const result = await new Promise(resolve => socket.timeout(5000).emit('screen-control', { action: 'start' }, (error, result) => resolve(error ? { error: 'Sunucu yanıt vermedi.' } : result)));
@@ -146,10 +156,15 @@
   video.onclick = () => video.play().catch(() => {});
   panel.querySelector('#share-fullscreen').onclick = () => { if (!video.hidden) video.requestFullscreen().catch(() => {}); };
   setInterval(() => {
-    const target = !document.querySelector('#room-screen').classList.contains('hidden') ? document.querySelector('#room-screen .window-body') : currentRoomType === 'server-channel' && !document.querySelector('#community-area').classList.contains('hidden')
-      ? document.querySelector('#community-area .community-main') : document.querySelector('#room-screen');
+    const inCommunityCall = !!currentRoomCode && currentRoomType === 'server-channel';
+    dock.hidden = !inCommunityCall;
+    document.body.classList.toggle('has-voice-dock', inCommunityCall);
+    dock.querySelector('strong').textContent = currentChannelDisplayName || 'Sesli görüşme';
+    dock.querySelector('[data-action=mute]').textContent = muted ? 'Mikrofonu aç' : 'Mikrofonu kapat';
+    dock.querySelector('[data-action=share]').textContent = stream ? 'Paylaşımı durdur' : 'Ekran paylaş';
+    const target = document.body;
     if (panel.parentElement !== target) target.append(panel);
-    panel.hidden = !currentRoomCode;
+    panel.hidden = !currentRoomCode || (!stream && !owner && !starting);
     communityShareButton.hidden = !currentRoomCode;
     communityShareButton.textContent = stream ? 'Paylaşımı durdur' : 'Ekran paylaş';
     if (socket !== boundSocket) {

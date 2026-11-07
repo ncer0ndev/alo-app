@@ -449,9 +449,10 @@ function showScreen(screen) {
   communityMain.classList.toggle('voice-stage-open', embedded);
   roomScreen.classList.toggle('embedded-voice', embedded);
   if (embedded) {
-    communityMain.append(roomScreen);
     authScreen.classList.add('hidden'); joinScreen.classList.remove('hidden');
-    enterCommunityMode(); roomScreen.classList.remove('hidden');
+    enterCommunityMode(); roomScreen.classList.add('hidden');
+    communityMain.classList.remove('voice-stage-open');
+    roomScreen.classList.remove('embedded-voice');
     updateActiveCallBar(); return;
   }
   if (roomScreen.parentElement === communityMain) document.querySelector('main').append(roomScreen);
@@ -1879,7 +1880,7 @@ function updateDmConversationPreview(username, message, fromSelf) {
   conv.lastText = message.text;
   conv.lastAt = message.ts;
   conv.lastFromSelf = fromSelf;
-  if (!fromSelf && currentDmUsername?.toLowerCase() !== username.toLowerCase()) {
+  if (!fromSelf && !(currentDmUsername?.toLowerCase() === username.toLowerCase() && dmThreadView.getClientRects().length && document.hasFocus())) {
     conv.unreadCount = (conv.unreadCount || 0) + 1;
   }
   if (!dmListView.classList.contains('hidden')) renderDmConversations();
@@ -1996,6 +1997,7 @@ async function openDmThread(targetUsername) {
   const conv = findDmConversation(targetUsername);
   if (conv) conv.unreadCount = 0;
   updateDmTabBadge();
+  renderDmRail();
 }
 
 function closeDmThread() {
@@ -2004,6 +2006,12 @@ function closeDmThread() {
   dmListView.classList.remove('hidden');
   renderDmConversations();
 }
+
+window.addEventListener('focus', () => {
+  if (currentDmUsername && dmThreadView.getClientRects().length && getSession().token) {
+    openDmThread(currentDmUsername);
+  }
+});
 
 function sendDmWithRetry(localMsg) {
   if (!socket || !socket.connected) {
@@ -4114,7 +4122,7 @@ function connectSocket() {
     seenDmMessageIds.add(message.id);
     updateDmConversationPreview(message.from, message, false);
 
-    if (currentDmUsername && currentDmUsername.toLowerCase() === message.from.toLowerCase()) {
+    if (currentDmUsername && currentDmUsername.toLowerCase() === message.from.toLowerCase() && dmThreadView.getClientRects().length && document.hasFocus()) {
       dmMessages.push({ ...message, own: false });
       dmAutoScroll = dmAutoScroll || dmLogEl.scrollTop + dmLogEl.clientHeight >= dmLogEl.scrollHeight - 40;
       renderDmLog();
@@ -4125,6 +4133,7 @@ function connectSocket() {
       const conv = findDmConversation(message.from);
       if (conv) conv.unreadCount = 0;
       updateDmTabBadge();
+      renderDmRail();
       return;
     }
 
@@ -4138,6 +4147,12 @@ function connectSocket() {
     }
   });
 
+  socket.on('dm-read', ({ username }) => {
+    const conversation = findDmConversation(username);
+    if (conversation) conversation.unreadCount = 0;
+    updateDmTabBadge(); renderDmRail();
+    if (!dmListView.classList.contains('hidden')) renderDmConversations();
+  });
   socket.on('dm-message-deleted', ({ messageId, withUsername }) => {
     if (currentDmUsername && withUsername && currentDmUsername.toLowerCase() === withUsername.toLowerCase()) {
       dmMessages = dmMessages.filter((m) => m.id !== messageId);

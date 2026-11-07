@@ -43,3 +43,16 @@
 .community-sidebar-head:has(.member-hover-role-add) { display: flex; align-items: center; justify-content: space-between; }
 .community-main > .social-tools { flex-shrink: 0; margin: 8px 16px; max-height: 55vh; overflow-y: auto; }
 #group-message { background: var(--bg); color: var(--fg); border: 1px solid var(--border); border-radius: 6px; padding: 10px; flex: 1; min-width: 0; }
+.voice-dock { position: fixed; z-index: 1100; left: 12px; bottom: 12px; width: 300px; max-width: calc(100vw - 24px); padding: 12px; box-sizing: border-box; border: 1px solid var(--border); border-radius: 12px; background: var(--panel); color: var(--fg); box-shadow: 0 8px 28px #0005; }
+.voice-dock[hidden] { display: none; }
+.voice-dock-title { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; font-size: 12px; }
+.voice-dock-title strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.voice-dock-dot { color: var(--accent); }
+.voice-dock-actions { display: flex; gap: 6px; }
+.voice-dock-actions .btn { flex: 1; min-width: 0; padding: 8px 4px; font-size: 10px; }
+.has-voice-dock #active-call-bar { display: none !important; }
+.has-voice-dock #server-channel-rail { padding-bottom: 120px; }
+.screen-floating-preview.social-tools { position: fixed; z-index: 1090; right: 16px; bottom: 16px; width: 360px; max-width: calc(100vw - 32px); max-height: 55vh; overflow: auto; margin: 0; padding: 10px; gap: 8px; box-shadow: 0 8px 28px #0005; }
+.screen-floating-preview video { max-height: 32vh; border-radius: 6px; }
+.screen-picker > select, .screen-picker > label { display: block; margin: 10px 0; }
+@media (max-width: 760px) { .screen-floating-preview.social-tools { bottom: 126px; width: 300px; } }
