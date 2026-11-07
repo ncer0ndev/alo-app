@@ -186,3 +186,14 @@ adres çubuğundan kaldırılır ve yalnızca kullanıcı onayladığında gönd
 Ayarlar eksikse gönderim açık bir mesajla kapalı tutulur. API yanıtları veya
 sunucu kayıtları doğrulama/sıfırlama anahtarlarını içermez. Otomatik testler
 sahte bir gönderici kullanır; gerçek posta göndermez.
+
+### Brevo ile gönderim
+
+Resend yerine Brevo kullanmak için Render Environment alanına
+`BREVO_API_KEY`, `MAIL_FROM` (Brevo'da doğrulanmış gönderen e-postası) ve
+`PUBLIC_APP_URL` ekleyin. `MAIL_FROM`, düz e-posta adresi veya
+`ALO <gonderen@example.com>` biçiminde olabilir. Brevo anahtarı varsa Brevo
+seçilir; yoksa mevcut Resend ayarları korunur. İletişim HTTPS API üzerinden
+yapılır; SMTP portlarına ihtiyaç yoktur. Brevo'nun hesap/gönderici onayı ve
+ücretsiz adreslere uyguladığı gönderici değiştirme kuralları geçerlidir.
+Anahtarı tarayıcıya, masaüstü paketine veya GitHub'a koymayın.

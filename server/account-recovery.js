@@ -62,11 +62,9 @@ function createRecovery({ db, sendMail, publicUrl, invalidateSessions = () => {}
 }
 
 function mountRecovery(app, { requireAuth, ...options }) {
-  const configured = Boolean(process.env.RESEND_API_KEY && process.env.MAIL_FROM && process.env.PUBLIC_APP_URL);
-  const service = createRecovery({ ...options, publicUrl: process.env.PUBLIC_APP_URL || 'https://alo-app.onrender.com', sendMail: async mail => {
-    const response = await fetch('https://api.resend.com/emails', { method: 'POST', headers: { Authorization: `Bearer ${process.env.RESEND_API_KEY}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ from: process.env.MAIL_FROM, ...mail }), signal: AbortSignal.timeout(15000) });
-    if (!response.ok) throw new Error('E-posta gönderilemedi. Biraz sonra tekrar dene.');
-  } });
+  const mailer = require('./mail').createMailer();
+  const configured = mailer.available;
+  const service = createRecovery({ ...options, publicUrl: process.env.PUBLIC_APP_URL || 'https://alo-app.onrender.com', sendMail: mailer.send });
   const limiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 10, standardHeaders: true, legacyHeaders: false, message: { error: 'Çok fazla deneme yaptın. 15 dakika sonra tekrar dene.' } });
   const route = fn => async (req, res) => { try { await fn(req, res); } catch { res.status(400).json({ error: 'İşlem tamamlanamadı. Şifreni, adresini veya bağlantının süresini kontrol edip tekrar dene.' }); } };
   const enabled = (_req, res, next) => configured ? next() : res.status(503).json({ error: 'E-posta hizmeti henüz etkinleştirilmedi. Lütfen daha sonra tekrar dene.' });

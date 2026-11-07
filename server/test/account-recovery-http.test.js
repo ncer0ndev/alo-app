@@ -7,6 +7,7 @@ const { randomUUID } = require('node:crypto');
 const { io: client } = require('socket.io-client');
 delete process.env.DATABASE_URL;
 delete process.env.RESEND_API_KEY;
+delete process.env.BREVO_API_KEY;
 process.env.DB_PATH = path.join(os.tmpdir(), `alo-recovery-http-${randomUUID()}.db`);
 process.env.PORT = '0';
 process.env.JWT_SECRET = 'recovery-test-secret-not-for-production';
