@@ -832,11 +832,29 @@ function startVoiceActivation() {
 
     const now = performance.now();
     if (level > threshold) vadLastActiveTime = now;
-    applyTrackEnabledState(now - vadLastActiveTime < 300);
+    const backgroundVoice = !window.api && document.hidden;
+    applyTrackEnabledState(backgroundVoice || now - vadLastActiveTime < 300);
 
     vadRafId = requestAnimationFrame(loop);
   }
   loop();
+}
+
+document.addEventListener('visibilitychange', () => {
+  if (window.api || !localStream || !currentRoomCode) return;
+  if (getSettings().micMode === 'voice' && document.hidden) {
+    // Animation frames stop in the background. Keep the silence gate open,
+    // while applyTrackEnabledState still respects the user's mute button.
+    applyTrackEnabledState(true);
+  } else if (!document.hidden && audioContext && audioContext.state !== 'running') {
+    audioContext.resume().catch(() => {});
+  }
+});
+
+function setCallAudioSession(active) {
+  if (window.api || !navigator.audioSession) return;
+  try { navigator.audioSession.type = active ? 'play-and-record' : 'auto'; }
+  catch { /* Experimental API: unsupported browsers retain normal audio. */ }
 }
 
 let pttToggleState = false;
@@ -853,6 +871,7 @@ function updatePttRegistration() {
 
 function applyMicMode() {
   stopVoiceActivation();
+  setCallAudioSession(Boolean(localStream && currentRoomCode));
   const mode = getSettings().micMode;
   muteBtn.classList.remove('hidden');
   muteBtn.textContent = muted ? '[ MİKROFONU AÇ ]' : '[ MİKROFONU KAPAT ]';
@@ -3322,6 +3341,7 @@ async function performJoinServerVoiceChannel(serverId, channelId, channelName) {
     showToast(ack?.error || 'kanala katılınamadı', 'error');
     localStream.getTracks().forEach((t) => t.stop());
     localStream = null;
+    setCallAudioSession(false);
     joining = false;
     return;
   }
@@ -3739,12 +3759,14 @@ function handleIncomingServerTextMessage(message) {
 // ---- oda / gorusme yasam donguesu ----
 
 async function acquireMicStream() {
+  setCallAudioSession(true);
   const settings = getSettings();
   try {
     return await navigator.mediaDevices.getUserMedia({
       audio: settings.micDeviceId ? { deviceId: { exact: settings.micDeviceId } } : true,
     });
   } catch (err) {
+    setCallAudioSession(Boolean(localStream && currentRoomCode));
     showToast('mikrofona erişilemedi: ' + err.message, 'error');
     return null;
   }
@@ -3788,6 +3810,7 @@ function teardownCurrentRoomState() {
     localStream = null;
   }
   currentRoomCode = null;
+  setCallAudioSession(false);
   currentRoomIsOwner = false;
   currentChannelServerId = null;
   currentChannelDisplayName = null;
@@ -3815,6 +3838,7 @@ async function enterRoom(roomCode, stream) {
   const result = await joinRoomAck(roomCode);
   if (!result || result.error) {
     showToast(result?.error || 'odaya katılınamadı', 'error');
+    setCallAudioSession(false);
     if (localStream) {
       localStream.getTracks().forEach((t) => t.stop());
       localStream = null;

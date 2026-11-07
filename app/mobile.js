@@ -1,6 +1,9 @@
 (() => {
   if (window.api || !/^https?:$/.test(location.protocol)) return;
   document.documentElement.classList.add('web-client');
+  // Native Safari controls offer its own PiP/fullscreen affordances where supported.
+  const sharedVideo = document.querySelector('#shared-screen');
+  if (sharedVideo) sharedVideo.controls = true;
   const mobile = matchMedia('(max-width: 680px)');
   const menu = document.createElement('button'); menu.className = 'mobile-menu-button'; menu.type = 'button';
   menu.textContent = '☰'; menu.setAttribute('aria-label', 'Mesajlar ve topluluklar'); menu.setAttribute('aria-expanded', 'false');

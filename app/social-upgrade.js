@@ -201,6 +201,15 @@
         if (document.pictureInPictureElement === video && document.exitPictureInPicture) await document.exitPictureInPicture();
         else video.webkitSetPresentationMode('inline');
       } else {
+        if (video.readyState < 2 || !video.videoWidth) {
+          status.textContent = 'Yayın görüntüsü henüz hazır değil. Görüntü geldikten sonra tekrar dene.';
+          return;
+        }
+        if (video.paused) {
+          video.play().catch(() => {});
+          status.textContent = 'Yayın oynatılıyor. Görüntü hareket edince PiP düğmesine tekrar dokun.';
+          return;
+        }
         // Invoke directly from the tap: Safari requires an active user gesture.
         if (video.webkitSupportsPresentationMode?.('picture-in-picture') && typeof video.webkitSetPresentationMode === 'function') {
           video.webkitSetPresentationMode('picture-in-picture');
@@ -213,8 +222,16 @@
         collapseShare();
         status.textContent = 'PiP istendi. Küçük pencere açılırsa başka uygulamaya geçerek deneyebilirsin; sesin arka planda sürmesi garanti değildir.';
       }
-    } catch {
-      status.textContent = 'PiP açılamadı. Yayını oynatıp tekrar dokun; iPhone bu canlı yayın için PiP’ye izin vermiyor olabilir.';
+    } catch (error) {
+      const reason = error?.name || 'UnknownError';
+      console.info('ALO PiP request rejected:', reason);
+      status.textContent = ['NotSupportedError', 'TypeError'].includes(reason)
+        ? 'Safari bu canlı yayın için küçük pencereyi desteklemiyor. Tam ekranı kullanabilirsin.'
+        : reason === 'InvalidStateError'
+        ? 'Video henüz PiP için hazır değil. Görüntünün oynadığından emin olup tekrar dene.'
+        : ['NotAllowedError', 'SecurityError'].includes(reason)
+        ? 'Safari küçük pencereye izin vermedi. Videonun kendi kontrollerindeki PiP simgesini deneyebilirsin.'
+        : 'Safari bu yayını küçük pencereye alamadı. Videonun kendi kontrollerini veya tam ekranı dene.';
     } finally { syncPip(); }
   };
   const closeExpanded = document.createElement('button');
