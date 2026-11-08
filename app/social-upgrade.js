@@ -105,7 +105,7 @@
   const peers = new Map();
   const candidates = new Map();
   function clearPeers() {
-    for (const pc of peers.values()) pc.close();
+    for (const pc of peers.values()) { pc.aloRecovery?.dispose(); pc.close(); }
     peers.clear(); candidates.clear(); video.srcObject = null; video.hidden = true;
   }
   function reportShareState(reason) {
@@ -134,6 +134,18 @@
       if (event.candidate) boundSocket.emit('screen-signal', { to: id, data: { candidate: event.candidate } });
     };
     pc.ontrack = event => { video.srcObject = event.streams[0]; video.muted = false; video.hidden = false; video.play().catch(() => { status.textContent = 'Oynatmak için görüntüye tıkla.'; }); };
+    pc.aloRecovery = window.aloCallHealth.createRecovery({
+      getState: () => pc.connectionState,
+      allowed: () => !!boundSocket?.connected && !!currentRoomCode && peers.get(id) === pc,
+      negotiate: async () => {
+        if (stream) return offerScreen(id, pc, true);
+        if (owner !== id) return false;
+        boundSocket.emit('screen-signal', { to: id, data: { request: true } });
+        return true;
+      },
+      onExhausted: () => { status.textContent = 'Görüntü bağlantısı toparlanamadı. Görüşme panelinden Yeniden bağlan seçeneğini dene.'; },
+    });
+    pc.onconnectionstatechange = () => pc.aloRecovery.changed();
     if (stream) stream.getTracks().forEach(track => {
       const sender = pc.addTrack(track, stream);
       if (track.kind === 'video') {
@@ -145,12 +157,23 @@
     });
     return pc;
   }
+  async function offerScreen(id, pc, restart = false) {
+    if (pc.aloMakingOffer || pc.signalingState !== 'stable') return false;
+    pc.aloMakingOffer = true;
+    try {
+      const offer = await pc.createOffer(restart ? { iceRestart: true } : undefined);
+      if (peers.get(id) !== pc || !boundSocket?.connected || pc.signalingState !== 'stable') return false;
+      await pc.setLocalDescription(offer);
+      if (peers.get(id) !== pc || !boundSocket?.connected) return false;
+      boundSocket.emit('screen-signal', { to: id, data: { sdp: pc.localDescription } });
+      return true;
+    } finally { pc.aloMakingOffer = false; }
+  }
   async function signal({ from, data }) {
     try {
       const pc = connection(from);
       if (data.request && stream) {
-        await pc.setLocalDescription(await pc.createOffer());
-        boundSocket.emit('screen-signal', { to: from, data: { sdp: pc.localDescription } });
+        await offerScreen(from, pc, true);
       } else if (data.sdp) {
         await pc.setRemoteDescription(data.sdp);
         for (const candidate of candidates.get(from) || []) await pc.addIceCandidate(candidate);
@@ -271,7 +294,10 @@
     video.play().catch(() => {});
   };
   document.addEventListener('alo-room-rejoined', () => {
-    if (!recoveringShare || !stream || !boundSocket?.connected) return;
+    if (!boundSocket?.connected) return;
+    if (!stream) { clearPeers(); boundSocket.emit('screen-control', { action: 'state' }, ownerChanged); return; }
+    if (stream.getVideoTracks().every(track => track.readyState === 'ended')) { stop(true, 'device-ended'); return; }
+    clearPeers(); video.srcObject = stream; video.muted = true; video.hidden = false;
     const captured = stream;
     boundSocket.emit('screen-control', { action: 'start' }, result => {
       if (stream !== captured) return;
@@ -279,6 +305,7 @@
       else { recoveringShare = false; status.textContent = 'Ekran paylaşımı yeniden bağlandı'; }
     });
   });
+  document.addEventListener('alo-network-restored', () => { for (const pc of peers.values()) void pc.aloRecovery?.recover(); });
   setInterval(() => {
     const inCommunityCall = !!currentRoomCode && currentRoomType === 'server-channel';
     dock.hidden = !inCommunityCall;

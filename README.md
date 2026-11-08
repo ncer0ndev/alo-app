@@ -197,3 +197,23 @@ seçilir; yoksa mevcut Resend ayarları korunur. İletişim HTTPS API üzerinden
 yapılır; SMTP portlarına ihtiyaç yoktur. Brevo'nun hesap/gönderici onayı ve
 ücretsiz adreslere uyguladığı gönderici değiştirme kuralları geçerlidir.
 Anahtarı tarayıcıya, masaüstü paketine veya GitHub'a koymayın.
+
+### Görüşme toparlama ve kalite paneli
+
+Görüşme sırasında üst çubuktaki **Görüşme** düğmesi; sunucu/oda bağlantısı,
+mikrofon durumu, kişi bazında ses ve susturma ile yeniden bağlanma kontrollerini açar.
+Gecikme, ses dalgalanması ve aralıklı paket kaybı WebRTC istatistiklerinden
+hesaplanır; eksik veriye kalite değeri uydurulmaz, ölçümler sunucuya gönderilmez.
+Bazı mobil tarayıcılar medya ses düzeyini sistem düğmeleriyle sınırlar.
+
+İnternet değişimi, başarısız ses/görüntü bağlantısı ve arka plandan dönüşte
+bağlantı teklifleri yenilenir. Otomatik denemeler sınırlıdır; odadan çıkıştan
+sonra eski bir istek görüşmeyi yeniden açamaz. Mikrofon durmuşsa otomatik
+kurtarma yalnızca önceden verilmiş izinle denenir; gerektiğinde kullanıcı
+**Ses ve mikrofonu devam ettir** düğmesini kullanır. Susturma tercihi korunur.
+Cihazın bitirdiği ekran yakalama oturumu otomatik olarak yeniden başlatılmaz.
+
+Mikrofon seviyesi testi 15 saniyede veya sayfa arka plana geçince durur;
+test için alınan akış kapatılır, görüşme mikrofonu kapatılmaz. Yankı azaltma,
+gürültü azaltma ve otomatik seviye seçenekleri desteklenen cihazlarda uygulanır.
+Gerçek iPhone ve Wi-Fi/hücresel geçişi ayrıca cihaz üzerinde test edilmelidir.

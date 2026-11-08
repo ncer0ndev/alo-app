@@ -20,7 +20,7 @@ test.after(() => { io.close(); server.closeAllConnections(); server.close(); for
 async function post(url, body) { return fetch(base + url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }); }
 test('reset revokes old HTTP tokens, disconnects sockets and allows new login', async () => {
   const account = await (await post('/api/register', { username: 'resetHttp', password: 'oldpassword' })).json();
-  const socket = client(base, { auth: { token: account.token }, reconnection: false });
+  const socket = client(base, { auth: { token: account.token }, reconnection: false, transports: ['websocket'] });
   try {
     await new Promise((resolve, reject) => { socket.once('connect', resolve); socket.once('connect_error', reject); });
     const messages = [];
@@ -39,7 +39,7 @@ test('reset revokes old HTTP tokens, disconnects sockets and allows new login', 
     assert.equal(login.status, 200);
     const { token } = await login.json();
     assert.equal((await fetch(base + '/api/me', { headers: { Authorization: `Bearer ${token}` } })).status, 200);
-    const stale = client(base, { auth: { token: account.token }, reconnection: false });
+    const stale = client(base, { auth: { token: account.token }, reconnection: false, transports: ['websocket'] });
     try { await new Promise((resolve, reject) => { stale.once('connect_error', resolve); stale.once('connect', () => reject(Error('old token was accepted'))); }); } finally { stale.close(); }
   } finally { socket.close(); }
 });

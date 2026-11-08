@@ -13,7 +13,7 @@ test('mobile serves the PWA assets without exposing desktop or server files', as
     const redirect = await fetch(base.slice(0, -1), { redirect: 'manual' });
     assert.equal(redirect.status, 302);
     assert.equal(redirect.headers.get('location'), '/mobile/');
-    for (const path of ['', 'mobile.js', 'mobile.css', 'sw.js', 'offline.html', 'manifest.webmanifest', 'assets/pwa-192.png', 'assets/pwa-512.png']) {
+    for (const path of ['', 'mobile.js', 'mobile.css', 'call-health.js', 'call-experience.js', 'call-experience.css', 'sw.js', 'offline.html', 'manifest.webmanifest', 'assets/pwa-192.png', 'assets/pwa-512.png']) {
       assert.equal((await fetch(base + path)).status, 200, path);
     }
     const manifest = await (await fetch(base + 'manifest.webmanifest')).json();

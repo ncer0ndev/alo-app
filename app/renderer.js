@@ -232,6 +232,11 @@ const pttKeySelect = document.getElementById('ptt-key-select');
 const pttKeyStatusEl = document.getElementById('ptt-key-status');
 const micLevelBar = document.getElementById('mic-level-bar');
 const micTestBtn = document.getElementById('mic-test-btn');
+const micTestFeedback = document.createElement('p');
+micTestFeedback.className = 'mic-test-feedback';
+micTestFeedback.setAttribute('role', 'status');
+micTestFeedback.textContent = 'Testi başlatıp normal sesle konuş. Görüşmedeysen mevcut mikrofon ve susturma ayarın geçerlidir.';
+micTestBtn.after(micTestFeedback);
 const themeRadios = document.querySelectorAll('input[name="theme-select"]');
 const themeOptionsGroup = document.querySelector('.theme-options');
 const uiModeToggle = document.getElementById('ui-mode-toggle');
@@ -286,8 +291,15 @@ let speakingRafId = null;
 let levelMeterCtx = null;
 let levelMeterRafId = null;
 let levelMeterTempStream = null;
+let levelMeterTimer = null;
+let levelMeterStarting = false;
+let levelMeterEpoch = 0;
 
 const peerConnections = {};
+let roomGeneration = 0;
+let roomRecovery = null;
+let roomRejoinTimer = null;
+let microphoneRecovery = null;
 const audioElements = {};
 const participantNames = {};
 const participantVolumes = {};
@@ -389,6 +401,9 @@ function getSettings() {
     vadSensitivity: Number(localStorage.getItem('vadSensitivity') || '50'),
     micDeviceId: localStorage.getItem('micDeviceId') || '',
     speakerDeviceId: localStorage.getItem('speakerDeviceId') || '',
+    echoCancellation: localStorage.getItem('echoCancellation') !== 'false',
+    noiseSuppression: localStorage.getItem('noiseSuppression') !== 'false',
+    autoGainControl: localStorage.getItem('autoGainControl') !== 'false',
     runInBackground: localStorage.getItem('runInBackground') === 'true',
     notifyIncomingCall: !doNotDisturb && localStorage.getItem('notifyIncomingCall') !== 'false',
     notifyFriendRequest: localStorage.getItem('notifyFriendRequest') !== 'false',
@@ -698,7 +713,7 @@ async function populateDeviceLists() {
 async function switchMicDevice(deviceId) {
   try {
     const newStream = await navigator.mediaDevices.getUserMedia({
-      audio: deviceId ? { deviceId: { exact: deviceId } } : true,
+      audio: callAudioConstraints(deviceId),
     });
     const newTrack = newStream.getAudioTracks()[0];
     for (const pc of Object.values(peerConnections)) {
@@ -717,6 +732,8 @@ async function switchMicDevice(deviceId) {
 // ---- mikrofon seviye testi (canli gorusmeden bagimsiz) ----
 
 function stopLevelMeter() {
+  levelMeterEpoch++;
+  clearTimeout(levelMeterTimer); levelMeterTimer = null;
   if (levelMeterRafId) cancelAnimationFrame(levelMeterRafId);
   levelMeterRafId = null;
   if (levelMeterCtx) {
@@ -729,6 +746,7 @@ function stopLevelMeter() {
   }
   micLevelBar.style.width = '0%';
   micTestBtn.textContent = '[ MİKROFONU TEST ET ]';
+  micTestFeedback.textContent = localStream ? 'Test durduruldu. Görüşme ayarın değişmedi.' : 'Test durduruldu. Test için açılan mikrofon serbest bırakıldı.';
 }
 
 async function toggleLevelMeter() {
@@ -736,13 +754,17 @@ async function toggleLevelMeter() {
     stopLevelMeter();
     return;
   }
+  if (levelMeterStarting) return;
+  levelMeterStarting = true; micTestBtn.disabled = true;
+  const epoch = levelMeterEpoch;
+  try {
 
   let stream = localStream;
   if (!stream) {
     const settings = getSettings();
     try {
       stream = await navigator.mediaDevices.getUserMedia({
-        audio: settings.micDeviceId ? { deviceId: { exact: settings.micDeviceId } } : true,
+        audio: callAudioConstraints(settings.micDeviceId),
       });
     } catch (err) {
       showToast('mikrofon test edilemedi: ' + err.message, 'error');
@@ -750,6 +772,7 @@ async function toggleLevelMeter() {
     }
     levelMeterTempStream = stream;
   }
+  if (epoch !== levelMeterEpoch) { if (stream !== localStream) stream.getTracks().forEach(track => track.stop()); return; }
 
   levelMeterCtx = new AudioContext();
   const source = levelMeterCtx.createMediaStreamSource(stream);
@@ -758,6 +781,10 @@ async function toggleLevelMeter() {
   source.connect(analyser);
   const data = new Uint8Array(analyser.frequencyBinCount);
   micTestBtn.textContent = '[ TESTİ DURDUR ]';
+  let lastFeedbackAt = 0;
+  const startedAt = performance.now();
+  await levelMeterCtx.resume().catch(() => {});
+  if (epoch !== levelMeterEpoch) return;
 
   function loop() {
     analyser.getByteTimeDomainData(data);
@@ -768,10 +795,21 @@ async function toggleLevelMeter() {
     }
     const level = Math.sqrt(sum / data.length);
     micLevelBar.style.width = `${Math.min(100, level * 300)}%`;
+    if (performance.now() - lastFeedbackAt > 800) {
+      lastFeedbackAt = performance.now();
+      const clipped = data.some(value => value < 3 || value > 252);
+      micTestFeedback.textContent = clipped ? 'Ses çok yüksek. Mikrofondan biraz uzaklaş veya giriş seviyesini azalt.' : level > .02 ? 'Sesin algılanıyor. Normal konuşma seviyesi uygun görünüyor.' : 'Ses çok düşük veya sessiz. Konuşmayı ve seçili mikrofonu kontrol et.';
+    }
+    if (performance.now() - startedAt > 15000) { stopLevelMeter(); return; }
     levelMeterRafId = requestAnimationFrame(loop);
   }
   loop();
+  levelMeterTimer = setTimeout(stopLevelMeter, 15000);
+  } catch {
+    stopLevelMeter(); showToast('Mikrofon testi başlatılamadı. Cihaz iznini kontrol et.', 'error');
+  } finally { levelMeterStarting = false; micTestBtn.disabled = false; }
 }
+document.addEventListener('visibilitychange', () => { if (document.hidden && (levelMeterRafId || levelMeterStarting)) stopLevelMeter(); });
 
 // ---- mikrofon modu: her zaman acik / sesle aktif / bas konus ----
 // onemli: analiz akisi (VAD) hicbir zaman kapatilmaz; sadece disariya giden
@@ -1341,14 +1379,18 @@ function updateDirectCallUI(roomType = 'room', displayLabel = null) {
 // ---- WebRTC eslesme ----
 
 function createPeerConnection(peerId) {
+  if (peerConnections[peerId]) return peerConnections[peerId];
   const pc = new RTCPeerConnection({ iceServers });
+  pc.aloOfferEpoch = 0;
+  pc.aloMakingOffer = false;
+  pc.aloIgnoreOffer = false;
 
   if (localStream) {
     localStream.getTracks().forEach((track) => pc.addTrack(track, localStream));
   }
 
   pc.onicecandidate = (event) => {
-    if (event.candidate) {
+    if (event.candidate && peerConnections[peerId] === pc && socket?.connected) {
       socket.emit('signal', { to: peerId, data: { candidate: event.candidate } });
     }
   };
@@ -1362,6 +1404,9 @@ function createPeerConnection(peerId) {
       audioElements[peerId] = audio;
     }
     audio.srcObject = event.streams[0];
+    audio.playsInline = true;
+    applyParticipantVolume(peerId, participantNames[peerId] || '');
+    audio.play().catch(() => document.dispatchEvent(new CustomEvent('alo-playback-blocked')));
     const speakerId = getSettings().speakerDeviceId;
     if (speakerId && audio.setSinkId) {
       audio.setSinkId(speakerId).catch(() => {});
@@ -1369,15 +1414,13 @@ function createPeerConnection(peerId) {
     setupSpeakingDetector(peerId, event.streams[0]);
   };
 
-  pc.onconnectionstatechange = () => {
-    if (pc.connectionState === 'failed') {
-      try {
-        pc.restartIce();
-      } catch {
-        // restartIce desteklenmiyorsa sessizce yoksay
-      }
-    }
-  };
+  pc.aloRecovery = window.aloCallHealth.createRecovery({
+    getState: () => pc.connectionState,
+    allowed: () => !!currentRoomCode && !!socket?.connected && peerConnections[peerId] === pc,
+    negotiate: () => negotiatePeer(peerId, pc, true),
+    onExhausted: () => document.dispatchEvent(new CustomEvent('alo-recovery-needed')),
+  });
+  pc.onconnectionstatechange = () => pc.aloRecovery.changed();
 
   peerConnections[peerId] = pc;
   return pc;
@@ -1385,9 +1428,22 @@ function createPeerConnection(peerId) {
 
 async function callPeer(peerId) {
   const pc = createPeerConnection(peerId);
-  const offer = await pc.createOffer();
-  await pc.setLocalDescription(offer);
-  socket.emit('signal', { to: peerId, data: { sdp: pc.localDescription } });
+  await negotiatePeer(peerId, pc);
+}
+
+async function negotiatePeer(peerId, pc, restart = false) {
+  if (!socket?.connected || peerConnections[peerId] !== pc || pc.aloMakingOffer || pc.signalingState !== 'stable') return false;
+  pc.aloMakingOffer = true;
+  const epoch = ++pc.aloOfferEpoch;
+  const transport = socket.id;
+  try {
+    const offer = await pc.createOffer(restart ? { iceRestart: true } : undefined);
+    if (epoch !== pc.aloOfferEpoch || pc.signalingState !== 'stable' || peerConnections[peerId] !== pc || socket.id !== transport) return false;
+    await pc.setLocalDescription(offer);
+    if (epoch !== pc.aloOfferEpoch || peerConnections[peerId] !== pc || socket.id !== transport) return false;
+    socket.emit('signal', { to: peerId, data: { sdp: pc.localDescription } });
+    return true;
+  } finally { pc.aloMakingOffer = false; }
 }
 
 async function flushPendingCandidates(peerId) {
@@ -1412,16 +1468,25 @@ async function handleSignal({ from, data }) {
     if (data.sdp) {
       if (data.sdp.type === 'offer') {
         pc = pc || createPeerConnection(from);
+        const collision = pc.aloMakingOffer || pc.signalingState !== 'stable';
+        const polite = String(socket.id).localeCompare(String(from)) > 0;
+        pc.aloIgnoreOffer = collision && !polite;
+        if (pc.aloIgnoreOffer) return;
+        pc.aloOfferEpoch++;
+        if (pc.signalingState !== 'stable') await pc.setLocalDescription({ type: 'rollback' });
         await pc.setRemoteDescription(new RTCSessionDescription(data.sdp));
         await flushPendingCandidates(from);
         const answer = await pc.createAnswer();
         await pc.setLocalDescription(answer);
         socket.emit('signal', { to: from, data: { sdp: pc.localDescription } });
       } else if (data.sdp.type === 'answer' && pc) {
+        if (pc.signalingState !== 'have-local-offer') return;
+        pc.aloIgnoreOffer = false;
         await pc.setRemoteDescription(new RTCSessionDescription(data.sdp));
         await flushPendingCandidates(from);
       }
     } else if (data.candidate) {
+      if (pc?.aloIgnoreOffer) return;
       if (pc && pc.remoteDescription) {
         await pc.addIceCandidate(new RTCIceCandidate(data.candidate));
       } else {
@@ -1484,6 +1549,7 @@ function stopSpeakingLoop() {
 
 function cleanupPeer(peerId) {
   if (peerConnections[peerId]) {
+    peerConnections[peerId].aloRecovery?.dispose();
     peerConnections[peerId].close();
     delete peerConnections[peerId];
   }
@@ -3752,12 +3818,17 @@ function handleIncomingServerTextMessage(message) {
 
 // ---- oda / gorusme yasam donguesu ----
 
+function callAudioConstraints(deviceId) {
+  const settings = getSettings();
+  return { ...(deviceId ? { deviceId: { exact: deviceId } } : {}), echoCancellation: settings.echoCancellation, noiseSuppression: settings.noiseSuppression, autoGainControl: settings.autoGainControl };
+}
+
 async function acquireMicStream() {
   setCallAudioSession(true);
   const settings = getSettings();
   try {
     return await navigator.mediaDevices.getUserMedia({
-      audio: settings.micDeviceId ? { deviceId: { exact: settings.micDeviceId } } : true,
+      audio: callAudioConstraints(settings.micDeviceId),
     });
   } catch (err) {
     setCallAudioSession(Boolean(localStream && currentRoomCode));
@@ -3796,6 +3867,9 @@ function joinRoomAck(roomCode) {
 // mikrofon akisini durdurur. Boylece oda degistirirken hayalet katilimci
 // veya acik kalan mikrofon birakmaz.
 function teardownCurrentRoomState() {
+  roomGeneration++;
+  clearTimeout(roomRejoinTimer); roomRejoinTimer = null;
+  stopLevelMeter();
   if (socket && currentRoomCode) socket.emit('leave-room');
   cleanupAllPeers();
   stopVoiceActivation();
@@ -3968,7 +4042,7 @@ function connectSocket() {
   socket.on('connect', () => {
     if (currentRoomCode) {
       showToast('yeniden bağlanıldı, odaya tekrar katılınıyor...', 'ok', 3000);
-      rejoinAfterReconnect();
+      void rejoinAfterReconnect().catch(() => document.dispatchEvent(new CustomEvent('alo-recovery-needed')));
     }
     // Sunucu oyun durumunu baglanti omru boyunca tutar (kalici degil);
     // yeniden baglanildiginda bilinen son durumu tekrar gonderiyoruz.
@@ -4223,21 +4297,44 @@ function connectSocket() {
   });
 }
 
-async function rejoinAfterReconnect() {
+function rejoinAfterReconnect(attempt = 0) {
+  clearTimeout(roomRejoinTimer); roomRejoinTimer = null;
+  const key = `${roomGeneration}:${currentRoomCode}:${socket?.id}`;
+  if (roomRecovery?.key === key) return roomRecovery.promise;
+  const task = { key, promise: null };
+  task.promise = performRoomRejoin(attempt).finally(() => { if (roomRecovery === task) roomRecovery = null; });
+  roomRecovery = task;
+  return task.promise;
+}
+
+async function performRoomRejoin(attempt = 0) {
   const roomCode = currentRoomCode;
   if (!roomCode) return;
+  const generation = roomGeneration;
+  const transport = socket?.id;
   cleanupAllPeers();
   const channelMatch = currentRoomType === 'server-channel' && /^CH(\d+)$/.exec(roomCode);
   const result = channelMatch
     ? await emitWithTimeout('join-server-channel', { channelId: Number(channelMatch[1]) })
     : await joinRoomAck(roomCode);
-  if (currentRoomCode !== roomCode) return;
+  if (currentRoomCode !== roomCode || roomGeneration !== generation || socket?.id !== transport) return;
   if (!result || result.error) {
+    if (!socket?.connected || /zaman|bağlantı|baglanti|sunucu/i.test(result?.error || '')) {
+      if (attempt < 2 && socket?.connected) {
+        roomRejoinTimer = setTimeout(() => {
+          roomRejoinTimer = null;
+          if (roomGeneration === generation && currentRoomCode === roomCode && socket?.connected && socket.id === transport) void rejoinAfterReconnect(attempt + 1).catch(() => {});
+        }, 2000 * (attempt + 1));
+      } else document.dispatchEvent(new CustomEvent('alo-recovery-needed'));
+      return;
+    }
     showToast('Görüşmeye yeniden bağlanılamadı. Devam etmek için kanala veya odaya tekrar katıl.', 'error', 5000);
-    currentRoomCode = null;
+    teardownCurrentRoomState();
     showScreen(joinScreen);
     return;
   }
+  await restoreCallMicrophone(false);
+  if (currentRoomCode !== roomCode || roomGeneration !== generation || socket?.id !== transport) return;
   renderParticipants();
   applyChatHistory(result.chatHistory);
   document.dispatchEvent(new CustomEvent('alo-room-rejoined'));
@@ -4246,6 +4343,53 @@ async function rejoinAfterReconnect() {
     await callPeer(peer.id);
   }
 }
+
+async function restoreCallMicrophone(manual = false) {
+  if (!currentRoomCode) return false;
+  const tracks = localStream?.getAudioTracks() || [];
+  if (tracks.some(track => track.readyState === 'live') && (!manual || !tracks.every(track => track.muted))) {
+    setCallAudioSession(true);
+    if (audioContext && audioContext.state !== 'running') void audioContext.resume().catch(() => {});
+    return !tracks.every(track => track.muted);
+  }
+  if (microphoneRecovery) return microphoneRecovery;
+  if (!manual) {
+    try { if ((await navigator.permissions.query({ name: 'microphone' })).state !== 'granted') return false; }
+    catch { return false; }
+  }
+  if (microphoneRecovery) return microphoneRecovery;
+  const generation = roomGeneration;
+  microphoneRecovery = (async () => {
+    const captured = await acquireMicStream();
+    if (!captured) return false;
+    if (generation !== roomGeneration || !currentRoomCode) { captured.getTracks().forEach(track => track.stop()); return false; }
+    const track = captured.getAudioTracks()[0];
+    try {
+      for (const pc of Object.values(peerConnections)) {
+        const sender = pc.getSenders().find(sender => sender.track?.kind === 'audio');
+        if (sender) await sender.replaceTrack(track);
+      }
+      if (generation !== roomGeneration || !currentRoomCode) { captured.getTracks().forEach(track => track.stop()); return false; }
+      const old = localStream; localStream = captured;
+      old?.getTracks().forEach(track => track.stop());
+      applyMicMode(); return true;
+    } catch { captured.getTracks().forEach(track => track.stop()); return false; }
+  })().finally(() => { microphoneRecovery = null; });
+  return microphoneRecovery;
+}
+
+async function recoverActiveCall(manual = false) {
+  if (!currentRoomCode || document.hidden) return;
+  if (!socket?.connected) { socket?.connect(); return; }
+  await restoreCallMicrophone(manual);
+  if (!Object.keys(peerConnections).length || manual) await rejoinAfterReconnect();
+  else await Promise.all(Object.values(peerConnections).map(pc => pc.aloRecovery?.recover()));
+  for (const audio of Object.values(audioElements)) await audio.play().catch(() => document.dispatchEvent(new CustomEvent('alo-playback-blocked')));
+  document.dispatchEvent(new CustomEvent('alo-network-restored'));
+}
+window.addEventListener('online', () => { void recoverActiveCall().catch(() => {}); });
+document.addEventListener('visibilitychange', () => { if (!document.hidden) void recoverActiveCall().catch(() => {}); });
+navigator.connection?.addEventListener('change', () => { void recoverActiveCall().catch(() => {}); });
 
 function setFriendOnline(username, online) {
   const row = friendsListEl.querySelector(`[data-username="${username.toLowerCase()}"]`);

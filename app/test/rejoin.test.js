@@ -3,12 +3,16 @@ const assert = require('node:assert/strict');
 const vm = require('node:vm');
 const fs = require('node:fs');
 const source = fs.readFileSync(require.resolve('../renderer.js'), 'utf8');
-const start = source.indexOf('async function rejoinAfterReconnect()');
-const end = source.indexOf('\nfunction setFriendOnline', start);
+const start = source.indexOf('function rejoinAfterReconnect(');
+const end = source.indexOf('\nasync function restoreCallMicrophone', start);
 function fixture(room, type) {
   const calls = [], events = [];
   const context = {
     currentRoomCode: room, currentRoomType: type,
+    roomGeneration: 0, roomRecovery: null, roomRejoinTimer: null, socket: { id: 'local-socket', connected: true },
+    clearTimeout() {}, setTimeout() { return 1; },
+    restoreCallMicrophone: async () => true,
+    teardownCurrentRoomState() { context.currentRoomCode = null; },
     cleanupAllPeers() {}, renderParticipants() {}, applyChatHistory() {},
     joinRoomAck: async code => { calls.push(['room', code]); return { existingPeers: [] }; },
     emitWithTimeout: async (name, payload) => { calls.push([name, payload]); return { existingPeers: [] }; },
@@ -40,4 +44,19 @@ test('a stale room response does not restore a share after leaving', async () =>
   f.context.emitWithTimeout = async () => { f.context.currentRoomCode = null; return { existingPeers: [] }; };
   await f.context.rejoinAfterReconnect();
   assert.equal(f.events.length, 0);
+});
+test('concurrent reconnect requests share one room join', async () => {
+  const f = fixture('CH42', 'server-channel');
+  let finish, calls = 0;
+  f.context.emitWithTimeout = () => { calls++; return new Promise(resolve => { finish = resolve; }); };
+  const first = f.context.rejoinAfterReconnect(); const second = f.context.rejoinAfterReconnect();
+  assert.equal(calls, 1); assert.equal(first, second);
+  finish({ existingPeers: [] }); await first;
+});
+test('transport timeout keeps call context while a removed room tears it down', async () => {
+  const f = fixture('CH42', 'server-channel');
+  f.context.emitWithTimeout = async () => ({ error: 'zaman aşımı, tekrar dene' });
+  await f.context.rejoinAfterReconnect(); assert.equal(f.context.currentRoomCode, 'CH42');
+  f.context.emitWithTimeout = async () => ({ error: 'kanal bulunamadi' });
+  await f.context.rejoinAfterReconnect(); assert.equal(f.context.currentRoomCode, null);
 });

@@ -1,0 +1,40 @@
+/* Shared call controls use the same tokens and spacing on desktop and mobile. */
+[data-ui=modern] .btn { box-sizing: border-box; border-radius: 8px; line-height: 1.35; min-height: 36px; }
+[data-ui=modern] .btn:focus-visible, [data-ui=modern] input:focus-visible, [data-ui=modern] select:focus-visible { outline: 2px solid var(--fg); outline-offset: 3px; }
+[data-ui=modern] .social-tools:not(.screen-floating-preview) { border: 1px solid var(--border); border-radius: 12px; padding: 16px; margin: 16px 0; }
+[data-ui=modern] .social-tools h3 { margin-top: 0; font-size: 13px; letter-spacing: .6px; }
+[data-ui=modern] .toast { border-radius: 10px; padding: 12px 14px; font: 13px/1.5 'Inter', sans-serif; text-align: left; }
+.call-audio-settings label { display: flex; align-items: center; gap: 10px; padding: 10px 0; }
+.call-health-button[hidden] { display: none !important; }
+.call-health-button { white-space: nowrap; font-size: 12px; }
+.call-health-button[data-quality=poor] { border-color: #e87c69; }
+.call-health-button[data-quality=fair] { border-color: #d7af54; }
+.call-health-dialog { width: min(560px, calc(100vw - 24px)); max-height: 85dvh; padding: 20px; box-sizing: border-box; overflow-y: auto; border: 1px solid var(--border); border-radius: 16px; background: var(--panel); color: var(--fg); font: 14px/1.5 'Inter', sans-serif; }
+.call-health-dialog::backdrop { background: #0009; }
+.call-health-dialog header { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.call-health-dialog h2 { font-size: 21px; margin: 0; }
+.call-health-dialog header button { width: 36px; height: 36px; padding: 0; flex: 0 0 36px; font-size: 22px; }
+.call-health-dialog h3 { font-size: 12px; letter-spacing: .8px; margin: 24px 0 12px; }
+.call-connection-state { font-weight: 650; margin-bottom: 6px; }
+.call-microphone-state, .call-person-quality, .call-health-dialog .hint-text { font-size: 12px; color: var(--dim); }
+.call-health-actions { display: flex; flex-wrap: wrap; gap: 8px; margin: 16px 0; }
+.call-health-dialog .btn { min-height: 36px; width: auto; padding: 8px 12px; border-radius: 8px; }
+.call-person { border: 1px solid var(--border); padding: 12px; border-radius: 10px; margin: 10px 0; }
+.call-person strong { overflow-wrap: anywhere; }
+.call-person-quality { margin: 4px 0 12px; }
+.call-person-controls { display: flex; align-items: center; gap: 10px; }
+.call-person-controls input { flex: 1; min-width: 0; accent-color: var(--fg); }
+.call-person-controls output { min-width: 40px; font-variant-numeric: tabular-nums; font-size: 12px; }
+.call-health-feedback:empty { display: none; }
+.mic-test-feedback { font-size: 12px; line-height: 1.6; color: var(--dim); }
+@media (max-width: 680px) {
+  .web-client .btn { min-height: 42px; }
+  .web-client .header-account-actions > .tab-btn { min-height: 36px; }
+  .web-client .field { gap: 6px; }
+  .web-client .call-health-button { padding: 6px 8px; font-size: 10px; max-width: 125px; overflow: hidden; text-overflow: ellipsis; }
+  .web-client .masthead { gap: 6px; }
+  .web-client .call-health-dialog .btn { min-height: 42px; }
+  .web-client .call-person-controls { flex-wrap: wrap; }
+  .web-client .call-person-controls input { min-height: 32px; }
+  .web-client .call-health-actions > button { flex: 1 1 160px; }
+}

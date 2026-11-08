@@ -42,7 +42,7 @@ const mime = { '.js': 'text/javascript', '.css': 'text/css', '.html': 'text/html
     res.setHeader('Cache-Control', 'no-store');
     let content = fs.readFileSync(file);
     if (file === path.join(root, 'index.html')) {
-      content = content.toString().replace("https://alo-app.onrender.com wss://alo-app.onrender.com", `${base} ${base.replace('http:', 'ws:')}`).replace('<script src="theme-init.js">', '<script src="test/bootstrap.js"></script><script src="theme-init.js">');
+      content = content.toString().replace("https://alo-app.onrender.com wss://alo-app.onrender.com", `${base} ${base.replace('http:', 'ws:')}`).replace(/<script src="theme-init\.js(?:\?[^" ]*)?">/, '<script src="test/bootstrap.js"></script>$&');
     }
     if (file === path.join(root, 'renderer.js')) content = content.toString().replace('https://alo-app.onrender.com', base);
     res.end(content);

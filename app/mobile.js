@@ -2,7 +2,7 @@
   if (window.api || !/^https?:$/.test(location.protocol)) return;
   document.documentElement.classList.add('web-client');
   const mobileInfo = document.createElement('section'); mobileInfo.className = 'social-tools';
-  const mobileVersion = document.createElement('p'); mobileVersion.textContent = 'Mobil sürüm: 2026.11.07-b';
+  const mobileVersion = document.createElement('p'); mobileVersion.textContent = 'Mobil sürüm: 2026.11.08-a';
   const permissionHelp = document.createElement('p');
   permissionHelp.textContent = 'Mikrofon izni her görüşmede soruluyorsa Safari → Sayfa menüsü → Web Sitesi Ayarları → Mikrofon → İzin Ver seç. Site verilerini temizlemek veya özel gezinmek bu tercihi sıfırlayabilir. Ekran paylaşımı için her seferinde sistem onayı gerekir.';
   const shareDiagnostic = document.createElement('p'); shareDiagnostic.setAttribute('role', 'status');

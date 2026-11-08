@@ -28,7 +28,7 @@ jobs:
           cache-dependency-path: app/package-lock.json
       - run: npm ci
         working-directory: app
-      - run: node --test test/updater.test.js test/experience.test.js
+      - run: node --test test/updater.test.js test/experience.test.js test/call-health.test.js test/peer-recovery.test.js test/rejoin.test.js
         working-directory: app
       - run: npm run ${{ matrix.command }}
         working-directory: app
