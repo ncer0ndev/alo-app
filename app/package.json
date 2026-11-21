@@ -1,6 +1,6 @@
 {
   "name": "sesli-sohbet-app",
-  "version": "1.10.7",
+  "version": "1.10.8",
   "private": true,
   "main": "main.js",
   "scripts": {

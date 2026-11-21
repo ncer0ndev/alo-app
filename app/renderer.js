@@ -696,7 +696,12 @@ async function populateDeviceLists() {
     opt.textContent = d.label || `mikrofon ${i + 1}`;
     micSelect.appendChild(opt);
   });
-  if (settings.micDeviceId) micSelect.value = settings.micDeviceId;
+  if (settings.micDeviceId) {
+    if (!mics.some(d => d.deviceId === settings.micDeviceId)) {
+      micSelect.appendChild(new Option('Kayıtlı mikrofon (bulunamazsa sistem varsayılanı)', settings.micDeviceId));
+    }
+    micSelect.value = settings.micDeviceId;
+  }
 
   const speakers = devices.filter((d) => d.kind === 'audiooutput');
   speakerSelect.innerHTML = '';
@@ -712,9 +717,7 @@ async function populateDeviceLists() {
 
 async function switchMicDevice(deviceId) {
   try {
-    const newStream = await navigator.mediaDevices.getUserMedia({
-      audio: callAudioConstraints(deviceId),
-    });
+    const newStream = await requestMicStream(deviceId);
     const newTrack = newStream.getAudioTracks()[0];
     for (const pc of Object.values(peerConnections)) {
       const sender = pc.getSenders().find((s) => s.track && s.track.kind === 'audio');
@@ -725,7 +728,7 @@ async function switchMicDevice(deviceId) {
     applyMicMode();
     showToast('mikrofon değiştirildi', 'ok', 2500);
   } catch (err) {
-    showToast('mikrofon değiştirilemedi: ' + err.message, 'error');
+    showToast(microphoneErrorMessage(err), 'error');
   }
 }
 
@@ -763,11 +766,9 @@ async function toggleLevelMeter() {
   if (!stream) {
     const settings = getSettings();
     try {
-      stream = await navigator.mediaDevices.getUserMedia({
-        audio: callAudioConstraints(settings.micDeviceId),
-      });
+      stream = await requestMicStream(settings.micDeviceId);
     } catch (err) {
-      showToast('mikrofon test edilemedi: ' + err.message, 'error');
+      showToast(microphoneErrorMessage(err), 'error');
       return;
     }
     levelMeterTempStream = stream;
@@ -3823,16 +3824,36 @@ function callAudioConstraints(deviceId) {
   return { ...(deviceId ? { deviceId: { exact: deviceId } } : {}), echoCancellation: settings.echoCancellation, noiseSuppression: settings.noiseSuppression, autoGainControl: settings.autoGainControl };
 }
 
+async function requestMicStream(deviceId) {
+  try {
+    return await navigator.mediaDevices.getUserMedia({ audio: callAudioConstraints(deviceId) });
+  } catch (err) {
+    // Permissions and busy devices must not trigger a second capture request.
+    if (!deviceId || !['NotFoundError', 'DevicesNotFoundError', 'OverconstrainedError'].includes(err.name)
+      || (err.name === 'OverconstrainedError' && err.constraint && err.constraint !== 'deviceId')) throw err;
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: callAudioConstraints('') });
+    saveSetting('micDeviceId', '');
+    micSelect.value = '';
+    showToast('Kayıtlı mikrofon bulunamadı. Sistem mikrofonuna geçildi; ses ayarlarından değiştirebilirsin.', 'info');
+    return stream;
+  }
+}
+
+function microphoneErrorMessage(err) {
+  if (['NotAllowedError', 'PermissionDeniedError', 'SecurityError'].includes(err.name)) return 'ALO mikrofon iznine sahip değil. Sistem veya tarayıcı ayarlarından mikrofon erişimine izin ver.';
+  if (['NotReadableError', 'TrackStartError'].includes(err.name)) return 'Mikrofon açılamadı. Başka bir uygulamanın mikrofonu kilitlemediğini ve cihazın bağlı olduğunu kontrol et.';
+  if (['NotFoundError', 'DevicesNotFoundError'].includes(err.name)) return 'Mikrofon bulunamadı. Cihazını bağlayıp ses ayarlarından tekrar seç.';
+  return 'Mikrofon başlatılamadı. Ses ayarlarından mikrofonunu kontrol edip tekrar dene.';
+}
+
 async function acquireMicStream() {
   setCallAudioSession(true);
   const settings = getSettings();
   try {
-    return await navigator.mediaDevices.getUserMedia({
-      audio: callAudioConstraints(settings.micDeviceId),
-    });
+    return await requestMicStream(settings.micDeviceId);
   } catch (err) {
     setCallAudioSession(Boolean(localStream && currentRoomCode));
-    showToast('mikrofona erişilemedi: ' + err.message, 'error');
+    showToast(microphoneErrorMessage(err), 'error');
     return null;
   }
 }
